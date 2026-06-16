@@ -82,10 +82,10 @@ FAKE_TLS_DOMAIN="example.com"
 
 ```shell
 # Entware (KeeneticOS)
-/opt/etc/init.d/S61tg-ws-proxy start
-/opt/etc/init.d/S61tg-ws-proxy status
-/opt/etc/init.d/S61tg-ws-proxy restart
-/opt/etc/init.d/S61tg-ws-proxy stop
+/opt/etc/init.d/S99tg-ws-proxy start
+/opt/etc/init.d/S99tg-ws-proxy status
+/opt/etc/init.d/S99tg-ws-proxy restart
+/opt/etc/init.d/S99tg-ws-proxy stop
 
 # OpenWrt/generic OPKG
 service tg-ws-proxy start
