@@ -51,14 +51,12 @@ print_link() {
             [ -n "$br_ip" ] || br_ip="$(ip -f inet addr show dev br0 2>/dev/null | sed -n 's/.*inet \([0-9.]\+\)\/.*/\1/p' | head -n 1)"
             [ -n "$br_ip" ] && link_host="$br_ip"
     fi
-    if [ -n "$FAKE_TLS_DOMAIN" ]; then
-      domain_hex="$(printf '%s' "$FAKE_TLS_DOMAIN" | od -An -tx1 2>/dev/null | tr -d ' \n')"
-      echo -e "$ansi_blue Connect link: tg://proxy?server=$link_host&port=$PORT&secret=ee$SECRET$domain_hex $ansi_std"
-      logger "Connect link: tg://proxy?server=$link_host&port=$PORT&secret=ee$SECRET$domain_hex"
-    else
-      echo -e "$ansi_blue Connect link: tg://proxy?server=$link_host&port=$PORT&secret=dd$SECRET $ansi_std"
-      logger "Connect link: tg://proxy?server=$link_host&port=$PORT&secret=dd$SECRET"
-    fi
+    fk=""
+    [ -n "$FAKE_TLS_DOMAIN" ] && fk="--fake-tls-domain $FAKE_TLS_DOMAIN"
+    link="$("$PROG" --print-link --host "$link_host" --port "$PORT" --secret "$SECRET" $fk)"
+
+    echo -e "$ansi_blue Connect link: $link $ansi_std"
+    logger "Connect link: $link"
 }
 
 start() {

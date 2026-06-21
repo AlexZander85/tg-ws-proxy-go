@@ -18,6 +18,7 @@ func parseFlags() (*Config, error) {
 	port := flag.Int("port", 1443, "Listen port")
 	secret := flag.String("secret", "", "MTProto secret (32 hex chars)")
 	genSecret := flag.Bool("gen-secret", false, "Generate random secret and print it")
+	printLink := flag.Bool("print-link", false, "Print the tg:// connect link and exit")
 	verbose := flag.Bool("v", false, "Verbose logs")
 	logFile := flag.String("log-file", "", "Log file path")
 	logMaxMB := flag.Float64("log-max-mb", 5, "Max log file size before rotate")
@@ -41,6 +42,10 @@ func parseFlags() (*Config, error) {
 	flag.Var(&dcIPs, "dc-ip", "Target DC IP as DC:IP; repeatable")
 	flag.Var(&dcIPPools, "dc-ip-pool", "Target pool as DC:IP1,IP2,...; repeatable")
 	flag.Parse()
+
+	if *printLink && *secret == "" {
+		return nil, errors.New("--print-link requires --secret")
+	}
 
 	if *secret == "" {
 		b := make([]byte, 16)
@@ -153,6 +158,7 @@ func parseFlags() (*Config, error) {
 		Port:                       *port,
 		SecretHex:                  *secret,
 		GenSecret:                  *genSecret,
+		PrintLink:                  *printLink,
 		FakeTLSDomain:              normalizedFakeTLSDomain,
 		DCMap:                      dcMap,
 		DCPool:                     dcPool,

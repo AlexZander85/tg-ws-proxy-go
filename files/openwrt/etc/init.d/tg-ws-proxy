@@ -37,7 +37,7 @@ load_config() {
 }
 
 print_link() {
-        local link_host br_ip
+        local link_host br_ip fk link
 
         load_config || return 1
         [ -n "$HOST" ] && [ -n "$PORT" ] && [ -n "$SECRET" ] || return 1
@@ -48,13 +48,11 @@ print_link() {
                 [ -n "$br_ip" ] || br_ip="$(ip -f inet addr show dev br0 2>/dev/null | sed -n 's/.*inet \([0-9.]\+\)\/.*/\1/p' | head -n 1)"
                 [ -n "$br_ip" ] && link_host="$br_ip"
         fi
+        fk=""
+        [ -n "$FAKE_TLS_DOMAIN" ] && fk="--fake-tls-domain $FAKE_TLS_DOMAIN"
+        link="$("$PROG" --print-link --host "$link_host" --port "$PORT" --secret "$SECRET" $fk)"
 
-        if [ -n "$FAKE_TLS_DOMAIN" ]; then
-                domain_hex="$(printf '%s' "$FAKE_TLS_DOMAIN" | od -An -tx1 2>/dev/null | tr -d ' \n')"
-                echo "Connect link: tg://proxy?server=$link_host&port=$PORT&secret=ee$SECRET$domain_hex"
-        else
-                echo "Connect link: tg://proxy?server=$link_host&port=$PORT&secret=dd$SECRET"
-        fi
+        echo "Connect link: $link"
 }
 
 start_service() {
