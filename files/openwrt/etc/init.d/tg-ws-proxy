@@ -32,6 +32,7 @@ load_config() {
         [ -n "${DC_IP_DEFAULT_POOL+x}" ] || DC_IP_DEFAULT_POOL=""
         [ -n "${CFPROXY_DOMAINS+x}" ] || CFPROXY_DOMAINS=""
         [ -n "${CFPROXY_DOMAINS_URL+x}" ] || CFPROXY_DOMAINS_URL=""
+        [ -n "${CFPROXY_WORKER_DOMAINS+x}" ] || CFPROXY_WORKER_DOMAINS=""
         [ -n "${FAKE_TLS_DOMAIN+x}" ] || FAKE_TLS_DOMAIN=""
         return 0
 }
@@ -79,6 +80,9 @@ start_service() {
         fi
         if [ -n "$CFPROXY_DOMAINS_URL" ]; then
                 procd_append_param command --cfproxy-domains-url "$CFPROXY_DOMAINS_URL"
+        fi
+        if [ -n "$CFPROXY_WORKER_DOMAINS" ]; then
+                procd_append_param command --cfproxy-worker-domain "$CFPROXY_WORKER_DOMAINS"
         fi
         if [ -n "$FAKE_TLS_DOMAIN" ]; then
                 procd_append_param command --fake-tls-domain "$FAKE_TLS_DOMAIN"

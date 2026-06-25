@@ -90,7 +90,7 @@ func debugf(cfg *Config, format string, args ...any) {
 }
 
 func warnf(format string, args ...any) {
-	log.Printf("WARNING  "+format, args...)
+	log.Printf("WARN   "+format, args...)
 }
 
 func logf(format string, args ...any) {

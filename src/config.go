@@ -6,42 +6,50 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 )
 
-func parseFlags() (*Config, error) {
-	host := flag.String("host", "127.0.0.1", "Listen host")
-	port := flag.Int("port", 1443, "Listen port")
-	secret := flag.String("secret", "", "MTProto secret (32 hex chars)")
-	genSecret := flag.Bool("gen-secret", false, "Generate random secret and print it")
-	printLink := flag.Bool("print-link", false, "Print the tg:// connect link and exit")
-	verbose := flag.Bool("v", false, "Verbose logs")
-	logFile := flag.String("log-file", "", "Log file path")
-	logMaxMB := flag.Float64("log-max-mb", 5, "Max log file size before rotate")
-	logBackups := flag.Int("log-backups", 0, "Number of rotated backups")
-	bufKB := flag.Int("buf-kb", 256, "Socket buffer size in KB")
-	poolSize := flag.Int("pool-size", 4, "WS pool size per DC")
-	fakeTLSDomain := flag.String("fake-tls-domain", "", "Enable Fake TLS (ee-secret) with masking domain")
-	cfproxyDomain := flag.String("cfproxy-domain", defaultCFProxyDomain, "Cloudflare-proxied domain for WS fallback")
-	cfproxyDomains := flag.String("cfproxy-domains", "", "Comma-separated Cloudflare proxy domain pool for WS fallback")
-	noCfproxy := flag.Bool("no-cfproxy", false, "Disable Cloudflare proxy fallback")
-	cfproxyPriority := flag.Bool("cfproxy-priority", true, "Try cfproxy before TCP fallback")
-	noCfproxyDomainRefresh := flag.Bool("no-cfproxy-domain-refresh", false, "Disable periodic CF proxy domain refresh from URL")
-	cfproxyDomainsURL := flag.String("cfproxy-domains-url", "", "URL to fetch CF proxy domain list from")
-	maxConns := flag.Int("max-conns", defaultMaxConns, "Max concurrent client sessions")
-	dcIPDefault := flag.String("dc-ip-default", "149.154.167.220", "Default WS target IP for all implicit DCs when --dc-ip is not provided")
-	dcIPDefaultPool := flag.String("dc-ip-default-pool", "", "Default WS target IP pool for implicit DCs, comma-separated")
-	pprofListen := flag.String("pprof-listen", "", "Optional pprof listen address (e.g. 127.0.0.1:6060)")
+func parseFlags(args []string) (*Config, error) {
+	fs := flag.NewFlagSet("tg-ws-proxy", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	host := fs.String("host", "127.0.0.1", "Listen host")
+	port := fs.Int("port", 1443, "Listen port")
+	secret := fs.String("secret", "", "MTProto secret (32 hex chars)")
+	genSecret := fs.Bool("gen-secret", false, "Generate random secret and print it")
+	printLink := fs.Bool("print-link", false, "Print the tg:// connect link and exit")
+	verbose := fs.Bool("v", false, "Verbose logs")
+	logFile := fs.String("log-file", "", "Log file path")
+	logMaxMB := fs.Float64("log-max-mb", 5, "Max log file size before rotate")
+	logBackups := fs.Int("log-backups", 0, "Number of rotated backups")
+	bufKB := fs.Int("buf-kb", 256, "Socket buffer size in KB")
+	poolSize := fs.Int("pool-size", 4, "WS pool size per DC")
+	fakeTLSDomain := fs.String("fake-tls-domain", "", "Enable Fake TLS (ee-secret) with masking domain")
+	cfproxyDomain := fs.String("cfproxy-domain", defaultCFProxyDomain, "Cloudflare-proxied domain for WS fallback")
+	cfproxyDomains := fs.String("cfproxy-domains", "", "Comma-separated Cloudflare proxy domain pool for WS fallback")
+	cfproxyWorkerDomains := fs.String("cfproxy-worker-domain", "", "Comma-separated Cloudflare Worker domain(s) for WS fallback (e.g. name-1234.user.workers.dev); tried first when set")
+	noCfproxy := fs.Bool("no-cfproxy", false, "Disable Cloudflare proxy fallback")
+	cfproxyPriority := fs.Bool("cfproxy-priority", true, "Try cfproxy before TCP fallback")
+	noCfproxyDomainRefresh := fs.Bool("no-cfproxy-domain-refresh", false, "Disable periodic CF proxy domain refresh from URL")
+	cfproxyDomainsURL := fs.String("cfproxy-domains-url", "", "URL to fetch CF proxy domain list from")
+	maxConns := fs.Int("max-conns", defaultMaxConns, "Max concurrent client sessions")
+	dcIPDefault := fs.String("dc-ip-default", "149.154.167.220", "Default WS target IP for all implicit DCs when --dc-ip is not provided")
+	dcIPDefaultPool := fs.String("dc-ip-default-pool", "", "Default WS target IP pool for implicit DCs, comma-separated")
+	pprofListen := fs.String("pprof-listen", "", "Optional pprof listen address (e.g. 127.0.0.1:6060)")
 
 	var dcIPs multiFlag
 	var dcIPPools multiFlag
-	flag.Var(&dcIPs, "dc-ip", "Target DC IP as DC:IP; repeatable")
-	flag.Var(&dcIPPools, "dc-ip-pool", "Target pool as DC:IP1,IP2,...; repeatable")
-	flag.Parse()
+	fs.Var(&dcIPs, "dc-ip", "Target DC IP as DC:IP; repeatable")
+	fs.Var(&dcIPPools, "dc-ip-pool", "Target pool as DC:IP1,IP2,...; repeatable")
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+
+	provided := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { provided[f.Name] = true })
 
 	if *printLink && *secret == "" {
 		return nil, errors.New("--print-link requires --secret")
@@ -119,7 +127,7 @@ func parseFlags() (*Config, error) {
 		dcMap[dc] = dcPool[dc][0]
 	}
 
-	userDomainProvided := flagProvided("cfproxy-domain")
+	userDomainProvided := provided["cfproxy-domain"]
 	userPoolProvided := strings.TrimSpace(*cfproxyDomains) != ""
 	userDomain := normalizeCFProxyDomain(*cfproxyDomain)
 	userFixedDomain := userDomainProvided && userDomain != ""
@@ -153,32 +161,42 @@ func parseFlags() (*Config, error) {
 		return nil, fmt.Errorf("invalid --fake-tls-domain: %s", *fakeTLSDomain)
 	}
 
+	var workerDomains []string
+	if strings.TrimSpace(*cfproxyWorkerDomains) != "" {
+		wd, err := parseCFProxyDomainCSV(*cfproxyWorkerDomains)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --cfproxy-worker-domain: %w", err)
+		}
+		workerDomains = wd
+	}
+
 	cfg := &Config{
-		Host:                       *host,
-		Port:                       *port,
-		SecretHex:                  *secret,
-		GenSecret:                  *genSecret,
-		PrintLink:                  *printLink,
-		FakeTLSDomain:              normalizedFakeTLSDomain,
-		DCMap:                      dcMap,
-		DCPool:                     dcPool,
-		FallbackCFProxy:            !*noCfproxy,
-		FallbackCFProxyPriority:    *cfproxyPriority,
-		FallbackCFProxyDomain:      "",
-		FallbackCFProxyUserDomain:  userFixedDomain || userPoolProvided,
-		FallbackCFProxyRefresh:     !*noCfproxyDomainRefresh,
-		FallbackCFProxyDomainsURL:  strings.TrimSpace(*cfproxyDomainsURL),
-		FallbackCFProxyDomains:     nil,
-		FallbackCFProxyActive:      "",
-		FallbackCFProxyPerDCActive: make(map[int]string),
-		Verbose:                    *verbose,
-		BufKB:                      maxInt(*bufKB, 4),
-		PoolSize:                   maxInt(*poolSize, 0),
-		MaxConns:                   maxInt(*maxConns, 1),
-		LogFile:                    *logFile,
-		LogMaxMB:                   *logMaxMB,
-		LogBackups:                 maxInt(*logBackups, 0),
-		PprofListen:                strings.TrimSpace(*pprofListen),
+		Host:                         *host,
+		Port:                         *port,
+		SecretHex:                    *secret,
+		GenSecret:                    *genSecret,
+		PrintLink:                    *printLink,
+		FakeTLSDomain:                normalizedFakeTLSDomain,
+		DCMap:                        dcMap,
+		DCPool:                       dcPool,
+		FallbackCFProxy:              !*noCfproxy,
+		FallbackCFProxyPriority:      *cfproxyPriority,
+		FallbackCFProxyDomain:        "",
+		FallbackCFProxyUserDomain:    userFixedDomain || userPoolProvided,
+		FallbackCFProxyRefresh:       !*noCfproxyDomainRefresh,
+		FallbackCFProxyDomainsURL:    strings.TrimSpace(*cfproxyDomainsURL),
+		FallbackCFProxyDomains:       nil,
+		FallbackCFProxyWorkerDomains: workerDomains,
+		FallbackCFProxyActive:        "",
+		FallbackCFProxyPerDCActive:   make(map[int]string),
+		Verbose:                      *verbose,
+		BufKB:                        maxInt(*bufKB, 4),
+		PoolSize:                     maxInt(*poolSize, 0),
+		MaxConns:                     maxInt(*maxConns, 1),
+		LogFile:                      *logFile,
+		LogMaxMB:                     *logMaxMB,
+		LogBackups:                   maxInt(*logBackups, 0),
+		PprofListen:                  strings.TrimSpace(*pprofListen),
 	}
 
 	cfg.setCFProxyDomains(domainPool)
@@ -226,14 +244,4 @@ func appendUniqueIP(dst []string, ip string) []string {
 		}
 	}
 	return append(dst, ip)
-}
-
-func flagProvided(name string) bool {
-	key := "--" + name
-	for _, arg := range os.Args[1:] {
-		if arg == key || strings.HasPrefix(arg, key+"=") {
-			return true
-		}
-	}
-	return false
 }

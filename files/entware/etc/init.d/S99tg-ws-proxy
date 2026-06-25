@@ -35,6 +35,7 @@ load_config() {
   . "$SECRET_FILE"
   [ -n "${CFPROXY_DOMAINS+x}" ] || CFPROXY_DOMAINS=""
   [ -n "${CFPROXY_DOMAINS_URL+x}" ] || CFPROXY_DOMAINS_URL=""
+  [ -n "${CFPROXY_WORKER_DOMAINS+x}" ] || CFPROXY_WORKER_DOMAINS=""
   [ -n "${FAKE_TLS_DOMAIN+x}" ] || FAKE_TLS_DOMAIN=""
   return 0
 }
@@ -80,6 +81,9 @@ start() {
   fi
   if [ -n "$CFPROXY_DOMAINS_URL" ]; then
     cf_args="$cf_args --cfproxy-domains-url $CFPROXY_DOMAINS_URL"
+  fi
+  if [ -n "$CFPROXY_WORKER_DOMAINS" ]; then
+    cf_args="$cf_args --cfproxy-worker-domain $CFPROXY_WORKER_DOMAINS"
   fi
   if [ -n "$FAKE_TLS_DOMAIN" ]; then
     cf_args="$cf_args --fake-tls-domain $FAKE_TLS_DOMAIN"

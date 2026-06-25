@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -15,7 +16,7 @@ import (
 )
 
 func main() {
-	cfg, err := parseFlags()
+	cfg, err := parseFlags(os.Args[1:])
 	if err != nil {
 		log.Fatalf("config error: %v", err)
 	}
@@ -61,6 +62,9 @@ func main() {
 		}
 		log.Printf("INFO     CF proxy:      active=%s pool=%d (%s, refresh=%s)", cfg.cfproxyActiveDomain(), cfg.cfproxyDomainPoolSize(), prio, refreshMode)
 	}
+	if cfg.hasCFProxyWorkerDomains() {
+		log.Printf("INFO     CF worker:     %s (tried first)", strings.Join(cfg.FallbackCFProxyWorkerDomains, ", "))
+	}
 	log.Printf("INFO   %s", strings.Repeat("=", 60))
 	log.Printf("INFO     Connect link:")
 	if cfg.FakeTLSDomain != "" {
@@ -72,7 +76,7 @@ func main() {
 
 	go func() {
 		for {
-			time.Sleep(60 * time.Second)
+			time.Sleep(statsLogInterval)
 			log.Printf("INFO   stats: %s", stats.summary())
 		}
 	}()
@@ -116,6 +120,12 @@ func main() {
 		case sessionsSem <- struct{}{}:
 			go func(conn net.Conn) {
 				defer func() { <-sessionsSem }()
+				defer func() {
+					if r := recover(); r != nil {
+						_ = conn.Close()
+						log.Printf("ERROR  [%s] panic recovered: %v", conn.RemoteAddr(), r)
+					}
+				}()
 				handleClient(conn, cfg, secret)
 			}(c)
 		default:
@@ -150,7 +160,7 @@ func handleClient(client net.Conn, cfg *Config, secret []byte) {
 		return
 	}
 
-	_ = handshakeConn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	_ = handshakeConn.SetReadDeadline(time.Now().Add(clientHandshakeTimeout))
 	hs := make([]byte, handshakeLen)
 	if _, err := io.ReadFull(handshakeConn, hs); err != nil {
 		debugf(cfg, "[%s] client disconnected before handshake", label)
@@ -168,7 +178,6 @@ func handleClient(client net.Conn, cfg *Config, secret []byte) {
 }
 
 func handleMTProtoClient(client net.Conn, cfg *Config, hi *handshakeInfo, secret []byte, label string) {
-
 	protoInt := protoFromTag(hi.ProtoTag)
 	mediaTag := ""
 	if hi.IsMedia {
@@ -206,6 +215,16 @@ func handleMTProtoClient(client net.Conn, cfg *Config, hi *handshakeInfo, secret
 			fallback = primaryTarget
 		}
 
+		useWorker := cfg.hasCFProxyWorkerDomains()
+		tryWorker := func() bool {
+			splitter := newFallbackSplitter()
+			if err := cfWorkerFallback(label, cfg, hi.DC, hi.IsMedia, fallback, client, relayInit, cltDec, cltEnc, tgEnc, tgDec, splitter); err == nil {
+				log.Printf("INFO   [%s] DC%d%s CF worker fallback closed", label, hi.DC, mediaTag)
+				return true
+			}
+			return false
+		}
+
 		useCF := cfg.FallbackCFProxy && cfg.hasCFProxyDomains()
 		tryCF := func() bool {
 			splitter := newFallbackSplitter()
@@ -226,6 +245,10 @@ func handleMTProtoClient(client net.Conn, cfg *Config, hi *handshakeInfo, secret
 				return true
 			}
 			return false
+		}
+
+		if useWorker && tryWorker() {
+			return
 		}
 
 		if useCF && cfg.FallbackCFProxyPriority {
@@ -269,7 +292,7 @@ func handleMTProtoClient(client net.Conn, cfg *Config, hi *handshakeInfo, secret
 		for _, target := range targets {
 			for _, d := range domains {
 				debugf(cfg, "[%s] DC%d%s -> wss://%s/apiws via %s", label, hi.DC, mediaTag, d, target)
-				conn, resp, err := wsConnect(target, []string{d}, timeout)
+				conn, resp, err := dialWS(target, d, timeout)
 				if err == nil {
 					allRedirect = false
 					return conn, wsFailedRedirect, allRedirect
@@ -287,27 +310,24 @@ func handleMTProtoClient(client net.Conn, cfg *Config, hi *handshakeInfo, secret
 		return nil, wsFailedRedirect, allRedirect
 	}
 
-	var ws *websocket.Conn
-	fromPool := false
-	if pooled := pool.get(cfg, key, primaryTarget, domains, &stats); pooled != nil {
-		ws = pooled
-		fromPool = true
-		log.Printf("INFO   [%s] DC%d%s -> pool hit via %s", label, hi.DC, mediaTag, primaryTarget)
+	dialFresh := func() *websocket.Conn {
+		timeout := wsConnectTimeout
+		if inCooldown(key) {
+			timeout = wsConnectCooldownTimeout
+		}
+		conn, wsFailedRedirect, allRedirect := connectWS(timeout)
+		if conn == nil {
+			doFallback(true, wsFailedRedirect, allRedirect, primaryTarget)
+		}
+		return conn
 	}
 
-	if ws == nil {
-		timeout := 10 * time.Second
-		if inCooldown(key) {
-			timeout = 2 * time.Second
-		}
-		wsFailedRedirect := false
-		allRedirect := true
-		ws, wsFailedRedirect, allRedirect = connectWS(timeout)
-
-		if ws == nil {
-			doFallback(true, wsFailedRedirect, allRedirect, primaryTarget)
-			return
-		}
+	ws := pool.get(cfg, key, primaryTarget, domains)
+	fromPool := ws != nil
+	if fromPool {
+		log.Printf("INFO   [%s] DC%d%s -> pool hit via %s", label, hi.DC, mediaTag, primaryTarget)
+	} else if ws = dialFresh(); ws == nil {
+		return
 	}
 
 	var splitter *msgSplitter
@@ -323,16 +343,7 @@ func handleMTProtoClient(client net.Conn, cfg *Config, hi *handshakeInfo, secret
 			doFallback(false, false, false, primaryTarget)
 			return
 		}
-
-		timeout := 10 * time.Second
-		if inCooldown(key) {
-			timeout = 2 * time.Second
-		}
-		wsFailedRedirect := false
-		allRedirect := true
-		ws, wsFailedRedirect, allRedirect = connectWS(timeout)
-		if ws == nil {
-			doFallback(true, wsFailedRedirect, allRedirect, primaryTarget)
+		if ws = dialFresh(); ws == nil {
 			return
 		}
 		if err := ws.WriteMessage(websocket.BinaryMessage, relayInit); err != nil {
