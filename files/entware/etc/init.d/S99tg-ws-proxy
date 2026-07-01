@@ -52,9 +52,11 @@ print_link() {
             [ -n "$br_ip" ] || br_ip="$(ip -f inet addr show dev br0 2>/dev/null | sed -n 's/.*inet \([0-9.]\+\)\/.*/\1/p' | head -n 1)"
             [ -n "$br_ip" ] && link_host="$br_ip"
     fi
-    fk=""
-    [ -n "$FAKE_TLS_DOMAIN" ] && fk="--fake-tls-domain $FAKE_TLS_DOMAIN"
-    link="$("$PROG" --print-link --host "$link_host" --port "$PORT" --secret "$SECRET" $fk)"
+    if [ -n "$FAKE_TLS_DOMAIN" ]; then
+      link="$("$PROG" --print-link --host "$link_host" --port "$PORT" --secret "$SECRET" --fake-tls-domain "$FAKE_TLS_DOMAIN")"
+    else
+      link="$("$PROG" --print-link --host "$link_host" --port "$PORT" --secret "$SECRET")"
+    fi
 
     echo -e "$ansi_blue Connect link: $link $ansi_std"
     logger "Connect link: $link"
@@ -75,24 +77,32 @@ start() {
     return 0
   fi
 
-  cf_args=""
+  set -- --host "$HOST" \
+    --port "$PORT" \
+    --secret "$SECRET" \
+    --dc-ip-default "$DC_IP_DEFAULT" \
+    --dc-ip-default-pool "$DC_IP_DEFAULT_POOL"
+
   if [ -n "$CFPROXY_DOMAINS" ]; then
-    cf_args="$cf_args --cfproxy-domains $CFPROXY_DOMAINS"
+    set -- "$@" --cfproxy-domains "$CFPROXY_DOMAINS"
   fi
   if [ -n "$CFPROXY_DOMAINS_URL" ]; then
-    cf_args="$cf_args --cfproxy-domains-url $CFPROXY_DOMAINS_URL"
+    set -- "$@" --cfproxy-domains-url "$CFPROXY_DOMAINS_URL"
   fi
   if [ -n "$CFPROXY_WORKER_DOMAINS" ]; then
-    cf_args="$cf_args --cfproxy-worker-domain $CFPROXY_WORKER_DOMAINS"
+    set -- "$@" --cfproxy-worker-domain "$CFPROXY_WORKER_DOMAINS"
   fi
   if [ -n "$FAKE_TLS_DOMAIN" ]; then
-    cf_args="$cf_args --fake-tls-domain $FAKE_TLS_DOMAIN"
+    set -- "$@" --fake-tls-domain "$FAKE_TLS_DOMAIN"
+  fi
+  if [ -n "$EXTRA_ARGS" ]; then
+    set -- "$@" $EXTRA_ARGS
   fi
 
   if [ "$LOG_LEVEL" = "1" ]; then
-	"$PROG" --host "$HOST" --port "$PORT" --secret "$SECRET" --dc-ip-default "$DC_IP_DEFAULT" --dc-ip-default-pool "$DC_IP_DEFAULT_POOL" $cf_args $EXTRA_ARGS >>"$LOGFILE" 2>&1 &
+	"$PROG" "$@" >>"$LOGFILE" 2>&1 &
   else
-	"$PROG" --host "$HOST" --port "$PORT" --secret "$SECRET" --dc-ip-default "$DC_IP_DEFAULT" --dc-ip-default-pool "$DC_IP_DEFAULT_POOL" $cf_args $EXTRA_ARGS >/dev/null 2>&1 &
+	"$PROG" "$@" >/dev/null 2>&1 &
   fi
 
   if [ -z "`pidof $PROC`" ]; then
