@@ -25,7 +25,7 @@ func parseFlags(args []string) (*Config, error) {
 	logFile := fs.String("log-file", "", "Log file path")
 	logMaxMB := fs.Float64("log-max-mb", 5, "Max log file size before rotate")
 	logBackups := fs.Int("log-backups", 0, "Number of rotated backups")
-	bufKB := fs.Int("buf-kb", 256, "Socket buffer size in KB")
+	bufKB := fs.Int("buf-kb", 64, "Socket buffer size in KB")
 	poolSize := fs.Int("pool-size", 4, "WS pool size per DC")
 	fakeTLSDomain := fs.String("fake-tls-domain", "", "Enable Fake TLS (ee-secret) with masking domain")
 	cfproxyDomain := fs.String("cfproxy-domain", defaultCFProxyDomain, "Cloudflare-proxied domain for WS fallback")

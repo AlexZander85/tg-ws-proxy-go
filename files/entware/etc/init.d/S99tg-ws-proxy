@@ -98,12 +98,11 @@ start() {
   if [ -n "$EXTRA_ARGS" ]; then
     set -- "$@" $EXTRA_ARGS
   fi
+  case " $EXTRA_ARGS " in
+    *" -v "*) set -- "$@" --log-file "$LOGFILE" ;;
+  esac
 
-  if [ "$LOG_LEVEL" = "1" ]; then
-	"$PROG" "$@" >>"$LOGFILE" 2>&1 &
-  else
-	"$PROG" "$@" >/dev/null 2>&1 &
-  fi
+  "$PROG" "$@" >/dev/null 2>&1 &
 
   if [ -z "`pidof $PROC`" ]; then
     echo -e "            $ansi_red failed. $ansi_std"

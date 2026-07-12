@@ -96,9 +96,9 @@ start_service() {
                 done
         fi
 
-        if [ "$LOG_LEVEL" = "1" ]; then
-                procd_append_param command --log-file "$LOGFILE"
-        fi
+        case " $EXTRA_ARGS " in
+                *" -v "*) procd_append_param command --log-file "$LOGFILE" ;;
+        esac
 
         procd_set_param stdout 1
         procd_set_param stderr 1
@@ -110,7 +110,7 @@ start_service() {
 }
 
 status_service() {
-        if [ -n "$(pidof tg-ws-proxy 2>/dev/null)" ]; then
+        if procd_running "$NAME" "$NAME.main"; then
                 echo "tg-ws-proxy is running"
                 print_link
                 return 0

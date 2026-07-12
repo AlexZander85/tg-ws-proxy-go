@@ -1,32 +1,27 @@
 # TG WS Proxy Go for embedded devices ([FAQ](https://github.com/Flowseal/tg-ws-proxy/issues/389))
 
-### Install
+### KeeneticOS
 
-> KeeneticOS
-Repository:
 ```shell
 curl -fsSL https://raw.githubusercontent.com/spatiumstas/feedly/main/add-repo.sh | sh
-```
-Package:
-```shell
 opkg install tg-ws-proxy
 ```
+### OpenWRT
+Вставьте ссылку на пакет из Releases
 
-> OpenWRT (IPK, APK)
-Insert package link from Releases
+> IPK
 
 ```shell
 opkg install %link%
 ```
-APK
+> APK
 ```shell
-wget -O "/etc/apk/keys/tg-ws-proxy.pem" "https://github.com/spatiumstas/tg-ws-proxy-go/releases/download/0.4/tg-ws-proxy.pem"
-apk add %link%
+wget -O "/etc/apk/keys/tg-ws-proxy.pem" "https://github.com/spatiumstas/tg-ws-proxy-go/releases/latest/download/tg-ws-proxy.pem"
+wget -O /tmp/tg-ws-proxy.apk %link%
+apk add /tmp/tg-ws-proxy.apk
 ```
 
-### Config
-
-Main config file:
+### Конфигурация
 
 ```shell
 # Entware (KeeneticOS):
@@ -37,13 +32,10 @@ Main config file:
 #   /etc/tg-ws-proxy/secret.conf
 ```
 
-Minimal config example:
-
 ```conf
 # config.conf
 HOST=0.0.0.0
 PORT=1443
-LOG_LEVEL=0
 DC_IP_DEFAULT=149.154.167.220
 DC_IP_DEFAULT_POOL=""
 FAKE_TLS_DOMAIN=""
@@ -55,30 +47,30 @@ EXTRA_ARGS=""
 SECRET=
 ```
 
-> Notes:
+> Примечания:
 
-1. `SECRET` must be 32 hex chars. If empty, it is auto-generated during install.
-2. `DC_IP_DEFAULT` and `DC_IP_DEFAULT_POOL` are global defaults for implicit DC map (`2,4`).
-3. `EXTRA_ARGS` is for per-DC overrides and extra runtime flags, [CFProxy](https://github.com/Flowseal/tg-ws-proxy/blob/main/docs/CfProxy.md)
-4. Full list of available commands `--help`
-5. `FAKE_TLS_DOMAIN` enables Fake TLS mode (`ee` secret link). Keep empty for standard `dd` mode.
-6. `CFPROXY_DOMAINS` - local fallback domain list.
-7. `CFPROXY_DOMAINS_URL` [default value](https://raw.githubusercontent.com/Flowseal/tg-ws-proxy/main/.github/cfproxy-domains.txt)
+1. `SECRET` должен быть строкой из 32 hex-символов. Если оставить пустым, он будет автоматически сгенерирован при запуске.
+2. `DC_IP_DEFAULT` и `DC_IP_DEFAULT_POOL` — глобальные значения по умолчанию для DC (`2,4`).
+3. `EXTRA_ARGS` используется для переопределений по DC и дополнительных флагов, см. [CFProxy](https://github.com/Flowseal/tg-ws-proxy/blob/main/docs/CfProxy.md).
+4. Полный список доступных команд: `--help`.
+5. `FAKE_TLS_DOMAIN` включает режим Fake TLS (`ee` secret link). Оставьте пустым для стандартного режима `dd`.
+6. `CFPROXY_DOMAINS` — локальный список fallback-доменов.
+7. `CFPROXY_DOMAINS_URL` — [значение по умолчанию](https://raw.githubusercontent.com/Flowseal/tg-ws-proxy/main/.github/cfproxy-domains.txt)/[зеркало](https://raw.githubusercontent.com/spatiumstas/tg-ws-proxy-go/main-go/.github/cfproxy-domains.txt)
 
-Override examples:
+Примеры переопределений:
 
 ```conf
-# Per-DC pool override (DC2)
+# Переопределение пула для отдельного DC (DC2)
 EXTRA_ARGS="--dc-ip-pool 2:149.154.175.50,149.154.167.220"
 
-# Per-DC single IP override (DC203) + verbose logs
+# Переопределение одним IP для отдельного DC (DC203) + логи
 EXTRA_ARGS="--dc-ip 203:91.105.192.100 -v"
 
-# Fake TLS mode (ee-secret)
+# Режим Fake TLS (ee-secret)
 FAKE_TLS_DOMAIN="example.com"
 ```
 
-### Run
+### Запуск
 
 ```shell
 # Entware (KeeneticOS)
@@ -94,36 +86,39 @@ service tg-ws-proxy restart
 service tg-ws-proxy stop
 ```
 
-### Logs
+### Запись логов
 
-If `LOG_LEVEL=1`, service logs are written to:
+```conf
+EXTRA_ARGS="-v"
+```
 
 ```shell
 # Entware (KeeneticOS): /opt/var/log/tg-ws-proxy.log
 # OpenWrt/generic OPKG: /var/log/tg-ws-proxy.log
 ```
 
-### Build from profile
+### Сборка
 
 ```shell
 cp config/entware/aarch64-3.10.config .config
 make package
 ```
 
-Output package:
 
 ```shell
 .build/tg-ws-proxy_<version>-1_<platform>_<target>.ipk
 ```
 
-### Remove
+### Удаление пакета
 
 ```shell
 opkg remove tg-ws-proxy
+apk del tg-ws-proxy
 ```
 
-### Remove repository
+### Удаление репозитория
 
 ```shell
 rm /opt/etc/opkg/feedly.conf
+rm /etc/apk/keys/tg-ws-proxy.pem
 ```

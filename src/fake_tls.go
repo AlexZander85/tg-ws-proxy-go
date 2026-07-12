@@ -216,7 +216,7 @@ func writeFakeTLSRedirect(client net.Conn, domain string) error {
 }
 
 func proxyToMaskingDomain(client net.Conn, initial []byte, domain string, label string) {
-	upstream, err := net.DialTimeout("tcp", net.JoinHostPort(domain, "443"), tcpDialTimeout)
+	upstream, err := newUpstreamDialer(tcpDialTimeout).Dial("tcp", net.JoinHostPort(domain, "443"))
 	if err != nil {
 		log.Printf("INFO   [%s] masking connect failed: %v", label, err)
 		return
@@ -229,6 +229,7 @@ func proxyToMaskingDomain(client net.Conn, initial []byte, domain string, label 
 		if _, err := upstream.Write(initial); err != nil {
 			return
 		}
+		_ = upstream.SetWriteDeadline(time.Time{})
 	}
 
 	done := make(chan struct{}, 2)
