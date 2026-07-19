@@ -1,2 +1,4 @@
+github.com/golang/net v0.33.0 h1:FzcpcbOtyS4vg5RCH9L/+ytgsZB06dh2ePK25I/ljnE=
+github.com/golang/net v0.33.0/go.mod h1:HXLR5J+9DxmrqMwG9qjGCxZ+zKXxBru04zlTvWlWuN4=
 github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
 github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=

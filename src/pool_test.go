@@ -80,7 +80,7 @@ func TestPoolRefillKeepsSizeLimit(t *testing.T) {
 	var cleanupsMu sync.Mutex
 	var cleanups []func()
 	var calls int64
-	poolWSConnect = func(string, []string, time.Duration) (*websocket.Conn, *http.Response, error) {
+	poolWSConnect = func(_ *Config, _ string, _ []string, _ time.Duration) (*websocket.Conn, *http.Response, error) {
 		atomic.AddInt64(&calls, 1)
 		conn, _, err := websocket.DefaultDialer.Dial(url, nil)
 		if err != nil {
@@ -131,7 +131,7 @@ func TestPoolRefillDialsSequentially(t *testing.T) {
 	var cleanups []func()
 	var active int64
 	var maxActive int64
-	poolWSConnect = func(string, []string, time.Duration) (*websocket.Conn, *http.Response, error) {
+	poolWSConnect = func(_ *Config, _ string, _ []string, _ time.Duration) (*websocket.Conn, *http.Response, error) {
 		cur := atomic.AddInt64(&active, 1)
 		for {
 			max := atomic.LoadInt64(&maxActive)

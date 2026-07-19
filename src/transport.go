@@ -23,15 +23,15 @@ var ioBufPool = sync.Pool{
 	},
 }
 
-func dialWS(targetIP, domain string, timeout time.Duration) (*websocket.Conn, *http.Response, error) {
-	return dialWSWithSNI(targetIP, domain, domain, timeout)
+func dialWS(cfg *Config, targetIP, domain string, timeout time.Duration) (*websocket.Conn, *http.Response, error) {
+	return dialWSWithSNI(cfg, targetIP, domain, domain, timeout)
 }
 
-func dialWSFronting(targetIP, domain string, timeout time.Duration) (*websocket.Conn, *http.Response, error) {
-	return dialWSWithSNI(targetIP, domain, "sprinthost.ru", timeout)
+func dialWSFronting(cfg *Config, targetIP, domain string, timeout time.Duration) (*websocket.Conn, *http.Response, error) {
+	return dialWSWithSNI(cfg, targetIP, domain, "sprinthost.ru", timeout)
 }
 
-func dialWSWithSNI(targetIP, domain, sni string, timeout time.Duration) (*websocket.Conn, *http.Response, error) {
+func dialWSWithSNI(cfg *Config, targetIP, domain, sni string, timeout time.Duration) (*websocket.Conn, *http.Response, error) {
 	u := url.URL{Scheme: "wss", Host: domain, Path: "/apiws"}
 	dialer := websocket.Dialer{
 		HandshakeTimeout: timeout,
@@ -41,7 +41,7 @@ func dialWSWithSNI(targetIP, domain, sni string, timeout time.Duration) (*websoc
 			InsecureSkipVerify: true,
 		},
 		NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return newUpstreamDialer(timeout).DialContext(ctx, "tcp", net.JoinHostPort(targetIP, "443"))
+			return dialUpstream(ctx, cfg, "tcp", net.JoinHostPort(targetIP, "443"), timeout)
 		},
 	}
 	headers := http.Header{}
@@ -236,8 +236,8 @@ func bridgeWS(label string, cfg *Config, dc int, isMedia bool, client net.Conn, 
 	)
 }
 
-func tcpFallback(client net.Conn, dst string, relayInit []byte, cltDec, cltEnc, tgEnc, tgDec cipher.Stream) error {
-	r, err := newUpstreamDialer(tcpDialTimeout).Dial("tcp", net.JoinHostPort(dst, "443"))
+func tcpFallback(cfg *Config, client net.Conn, dst string, relayInit []byte, cltDec, cltEnc, tgEnc, tgDec cipher.Stream) error {
+	r, err := dialUpstream(context.Background(), cfg, "tcp", net.JoinHostPort(dst, "443"), tcpDialTimeout)
 	if err != nil {
 		warnf("TCP fallback to %s:443 failed: %v", dst, err)
 		return err
@@ -332,19 +332,19 @@ func tcpFallback(client net.Conn, dst string, relayInit []byte, cltDec, cltEnc, 
 	return nil
 }
 
-func wsConnect(targetIP string, domains []string, timeout time.Duration) (*websocket.Conn, *http.Response, error) {
-	return wsConnectWithDialer(targetIP, domains, timeout, dialWS)
+func wsConnect(cfg *Config, targetIP string, domains []string, timeout time.Duration) (*websocket.Conn, *http.Response, error) {
+	return wsConnectWithDialer(cfg, targetIP, domains, timeout, dialWS)
 }
 
-func wsConnectFronting(targetIP string, domains []string, timeout time.Duration) (*websocket.Conn, *http.Response, error) {
-	return wsConnectWithDialer(targetIP, domains, timeout, dialWSFronting)
+func wsConnectFronting(cfg *Config, targetIP string, domains []string, timeout time.Duration) (*websocket.Conn, *http.Response, error) {
+	return wsConnectWithDialer(cfg, targetIP, domains, timeout, dialWSFronting)
 }
 
-func wsConnectWithDialer(targetIP string, domains []string, timeout time.Duration, dial func(string, string, time.Duration) (*websocket.Conn, *http.Response, error)) (*websocket.Conn, *http.Response, error) {
+func wsConnectWithDialer(cfg *Config, targetIP string, domains []string, timeout time.Duration, dial func(*Config, string, string, time.Duration) (*websocket.Conn, *http.Response, error)) (*websocket.Conn, *http.Response, error) {
 	var lastErr error
 	var lastResp *http.Response
 	for _, domain := range domains {
-		conn, resp, err := dial(targetIP, domain, timeout)
+		conn, resp, err := dial(cfg, targetIP, domain, timeout)
 		if err == nil {
 			return conn, resp, nil
 		}
@@ -357,7 +357,7 @@ func wsConnectWithDialer(targetIP string, domains []string, timeout time.Duratio
 	return nil, lastResp, lastErr
 }
 
-func dialWSByDomain(domain string, timeout time.Duration) (*websocket.Conn, *http.Response, error) {
+func dialWSByDomain(cfg *Config, domain string, timeout time.Duration) (*websocket.Conn, *http.Response, error) {
 	u := url.URL{Scheme: "wss", Host: domain, Path: "/apiws"}
 	dialer := websocket.Dialer{
 		HandshakeTimeout: timeout,
@@ -367,7 +367,7 @@ func dialWSByDomain(domain string, timeout time.Duration) (*websocket.Conn, *htt
 			InsecureSkipVerify: true,
 		},
 		NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return newUpstreamDialer(timeout).DialContext(ctx, network, addr)
+			return dialUpstream(ctx, cfg, network, addr, timeout)
 		},
 	}
 	headers := http.Header{}
@@ -376,7 +376,7 @@ func dialWSByDomain(domain string, timeout time.Duration) (*websocket.Conn, *htt
 	return dialer.Dial(u.String(), headers)
 }
 
-func dialWSWorker(worker, dst string, dc int, timeout time.Duration) (*websocket.Conn, *http.Response, error) {
+func dialWSWorker(cfg *Config, worker, dst string, dc int, timeout time.Duration) (*websocket.Conn, *http.Response, error) {
 	q := url.Values{}
 	q.Set("dst", dst)
 	q.Set("dc", strconv.Itoa(dc))
@@ -389,7 +389,7 @@ func dialWSWorker(worker, dst string, dc int, timeout time.Duration) (*websocket
 			InsecureSkipVerify: true,
 		},
 		NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return newUpstreamDialer(timeout).DialContext(ctx, network, addr)
+			return dialUpstream(ctx, cfg, network, addr, timeout)
 		},
 	}
 	headers := http.Header{}
@@ -409,7 +409,7 @@ func cfWorkerFallback(label string, cfg *Config, dc int, isMedia bool, dst strin
 
 	for _, worker := range cfg.cfproxyWorkerDomainsForTry() {
 		logf("INFO   [%s] DC%d%s -> CF worker wss://%s/apiws?dst=%s", label, dc, mediaTag, worker, dst)
-		ws, _, err := dialWSWorker(worker, dst, dc, wsConnectTimeout)
+		ws, _, err := dialWSWorker(cfg, worker, dst, dc, wsConnectTimeout)
 		if err != nil {
 			atomic.AddInt64(&stats.wsErrors, 1)
 			warnf("[%s] DC%d%s CF worker %s failed: %v", label, dc, mediaTag, worker, err)
@@ -439,7 +439,7 @@ func cfproxyFallback(label string, cfg *Config, dc int, isMedia bool, client net
 	for _, baseDomain := range cfg.cfproxyDomainsForTry(dc) {
 		domain := fmt.Sprintf("kws%d.%s", dc, baseDomain)
 		debugf(cfg, "[%s] DC%d%s -> CF proxy wss://%s/apiws", label, dc, mediaTag, domain)
-		ws, resp, err := dialWSByDomain(domain, wsConnectTimeout)
+		ws, resp, err := dialWSByDomain(cfg, domain, wsConnectTimeout)
 		if err != nil {
 			atomic.AddInt64(&stats.wsErrors, 1)
 			firstFailure := cfg.markCFProxyDomainFailed(baseDomain, cfproxyFailureCooldown(err))

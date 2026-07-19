@@ -5,6 +5,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/net/proxy"
 )
 
 type Config struct {
@@ -34,6 +36,8 @@ type Config struct {
 	LogMaxMB                     float64
 	LogBackups                   int
 	PprofListen                  string
+	OutboundProxy                string
+	outboundDialer               proxy.ContextDialer
 	cfproxyMu                    sync.RWMutex
 	cfproxyFailUntil             map[string]time.Time
 }

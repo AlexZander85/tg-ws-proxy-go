@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -39,6 +40,7 @@ func parseFlags(args []string) (*Config, error) {
 	dcIPDefault := fs.String("dc-ip-default", "149.154.167.220", "Default WS target IP for all implicit DCs when --dc-ip is not provided")
 	dcIPDefaultPool := fs.String("dc-ip-default-pool", "", "Default WS target IP pool for implicit DCs, comma-separated")
 	pprofListen := fs.String("pprof-listen", "", "Optional pprof listen address (e.g. 127.0.0.1:6060)")
+	outboundProxy := fs.String("outbound-proxy", "", "SOCKS5 proxy URL for upstream connections (socks5://host:port); falls back to TG_OUTBOUND_PROXY env var if unset")
 
 	var dcIPs multiFlag
 	var dcIPPools multiFlag
@@ -170,6 +172,15 @@ func parseFlags(args []string) (*Config, error) {
 		workerDomains = wd
 	}
 
+	outboundProxyURL := strings.TrimSpace(*outboundProxy)
+	if outboundProxyURL == "" {
+		outboundProxyURL = strings.TrimSpace(os.Getenv("TG_OUTBOUND_PROXY"))
+	}
+	outboundDialer, err := buildOutboundDialer(outboundProxyURL)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 		Host:                         *host,
 		Port:                         *port,
@@ -197,6 +208,8 @@ func parseFlags(args []string) (*Config, error) {
 		LogMaxMB:                     *logMaxMB,
 		LogBackups:                   maxInt(*logBackups, 0),
 		PprofListen:                  strings.TrimSpace(*pprofListen),
+		OutboundProxy:                outboundProxyURL,
+		outboundDialer:               outboundDialer,
 	}
 
 	cfg.setCFProxyDomains(domainPool)

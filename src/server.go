@@ -239,7 +239,7 @@ func handleMTProtoClient(client net.Conn, cfg *Config, hi *handshakeInfo, secret
 				return false
 			}
 			log.Printf("INFO   [%s] DC%d%s -> TCP fallback to %s:443", label, hi.DC, mediaTag, fallback)
-			err := tcpFallback(client, fallback, relayInit, cltDec, cltEnc, tgEnc, tgDec)
+			err := tcpFallback(cfg, client, fallback, relayInit, cltDec, cltEnc, tgEnc, tgDec)
 			if err == nil {
 				log.Printf("INFO   [%s] DC%d%s TCP fallback closed", label, hi.DC, mediaTag)
 				return true
@@ -309,7 +309,7 @@ func handleMTProtoClient(client net.Conn, cfg *Config, hi *handshakeInfo, secret
 		for _, target := range directTargets {
 			for _, d := range domains {
 				debugf(cfg, "[%s] DC%d%s -> wss://%s/apiws via %s", label, hi.DC, mediaTag, d, target)
-				conn, resp, err := dialWS(target, d, timeout)
+				conn, resp, err := dialWS(cfg, target, d, timeout)
 				if err == nil {
 					allRedirect = false
 					return conn, target, wsFailedRedirect, allRedirect, timedOut
@@ -339,7 +339,7 @@ func handleMTProtoClient(client net.Conn, cfg *Config, hi *handshakeInfo, secret
 	connectFronting := func(reason string) (*websocket.Conn, string) {
 		for _, target := range directTargets {
 			log.Printf("INFO   [%s] DC%d%s -> fronting %s via %s", label, hi.DC, mediaTag, reason, target)
-			conn, _, err := wsConnectFronting(target, domains, wsConnectTimeout)
+			conn, _, err := wsConnectFronting(cfg, target, domains, wsConnectTimeout)
 			if err == nil {
 				setFrontingActive()
 				atomic.AddInt64(&stats.connectionsFront, 1)
