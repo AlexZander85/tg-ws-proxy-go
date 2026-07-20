@@ -124,6 +124,27 @@ func TestTransparentDCForIP(t *testing.T) {
 	}
 }
 
+func TestTransparentDCForIPRange(t *testing.T) {
+	cases := []struct {
+		ip   string
+		dc   int
+		want bool
+	}{
+		{ip: "149.154.167.222", dc: 2, want: true},
+		{ip: "149.154.166.121", dc: 4, want: true},
+		{ip: "91.108.4.140", dc: 4, want: true},
+		{ip: "2001:67c:4e8:f002::a", dc: 2, want: true},
+		{ip: "149.154.162.123", want: false},
+		{ip: "8.8.8.8", want: false},
+	}
+	for _, tc := range cases {
+		dc, ok := transparentDCForIPRange(net.ParseIP(tc.ip))
+		if ok != tc.want || (ok && dc != tc.dc) {
+			t.Errorf("transparentDCForIPRange(%s) = (%d, %v), want (%d, %v)", tc.ip, dc, ok, tc.dc, tc.want)
+		}
+	}
+}
+
 func TestReservedTransparentPrefix(t *testing.T) {
 	for _, prefix := range [][]byte{
 		[]byte("HEAD"),
