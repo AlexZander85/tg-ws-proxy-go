@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/cipher"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -46,6 +47,9 @@ func main() {
 	if cfg.FakeTLSDomain != "" {
 		log.Printf("INFO     Fake TLS:      %s", cfg.FakeTLSDomain)
 	}
+	if cfg.TransparentListen != "" {
+		log.Printf("INFO     Transparent:   %s (TPROXY, fail-open=%t)", cfg.TransparentListen, cfg.TransparentFailOpen)
+	}
 	log.Printf("INFO     Target DC IPs:")
 	for _, item := range sortedDCMap(cfg.DCMap) {
 		dc, ip := item.dc, item.ip
@@ -82,6 +86,11 @@ func main() {
 	}()
 
 	warmupPool(cfg)
+	if cfg.TransparentListen != "" {
+		if err := startTransparentServer(cfg); err != nil {
+			log.Fatalf("transparent listener error: %v", err)
+		}
+	}
 
 	ln, err := net.Listen("tcp", net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)))
 	if err != nil {
@@ -185,7 +194,13 @@ func handleMTProtoClient(client net.Conn, cfg *Config, hi *handshakeInfo, secret
 	}
 
 	relayInit := generateRelayInit(hi.ProtoTag, signedDC(hi.DC, hi.IsMedia))
-	cltDec, cltEnc, tgEnc, tgDec, err := buildCiphers(hi.ClientDecI, relayInit, secret)
+	var cltDec, cltEnc, tgEnc, tgDec cipher.Stream
+	var err error
+	if hi.Direct {
+		cltDec, cltEnc, tgEnc, tgDec, err = buildDirectCiphers(hi.ClientDecI, relayInit)
+	} else {
+		cltDec, cltEnc, tgEnc, tgDec, err = buildCiphers(hi.ClientDecI, relayInit, secret)
+	}
 	if err != nil {
 		log.Printf("ERROR  [%s] cipher init failed: %v", label, err)
 		return
