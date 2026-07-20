@@ -1,4 +1,4 @@
-name: Export branch checkout
+name: Transparent bridge validation
 
 on:
   pull_request:
@@ -9,14 +9,20 @@ permissions:
   contents: read
 
 jobs:
-  export:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Pack checkout
-        run: tar --exclude=.git -czf "$RUNNER_TEMP/tg-ws-proxy-go.tgz" .
-      - uses: actions/upload-artifact@v7
+      - uses: actions/setup-go@v6
         with:
-          name: tg-ws-proxy-go-checkout
-          path: ${{ runner.temp }}/tg-ws-proxy-go.tgz
-          retention-days: 1
+          go-version-file: src/go.mod
+          cache: true
+          cache-dependency-path: src/go.sum
+      - name: Check formatting
+        run: test -z "$(gofmt -l src/*.go)"
+      - name: Run unit tests
+        run: cd src && go test ./...
+      - name: Build Linux binary
+        run: cd src && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...
+      - name: Verify non-Linux build tags
+        run: cd src && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./...
