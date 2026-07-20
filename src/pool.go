@@ -127,6 +127,7 @@ func (p *wsPool) discardTarget(targetIP string) {
 }
 
 func warmupPool(cfg *Config) {
+	startTransparent(cfg)
 	if cfg.PoolSize <= 0 {
 		return
 	}
