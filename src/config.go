@@ -18,6 +18,8 @@ func parseFlags(args []string) (*Config, error) {
 	fs.SetOutput(io.Discard)
 	host := fs.String("host", "127.0.0.1", "Listen host")
 	port := fs.Int("port", 1443, "Listen port")
+	noMTProxyListener := fs.Bool("no-mtproxy-listener", false, "Disable the explicit secret-based MTProxy listener")
+	outboundMark := fs.Uint("outbound-mark", 0, "Linux SO_MARK value for all upstream proxy sockets (decimal or 0x-prefixed)")
 	secret := fs.String("secret", "", "MTProto secret (32 hex chars)")
 	genSecret := fs.Bool("gen-secret", false, "Generate random secret and print it")
 	printLink := fs.Bool("print-link", false, "Print the tg:// connect link and exit")
@@ -39,14 +41,15 @@ func parseFlags(args []string) (*Config, error) {
 	dcIPDefault := fs.String("dc-ip-default", "149.154.167.220", "Default WS target IP for all implicit DCs when --dc-ip is not provided")
 	dcIPDefaultPool := fs.String("dc-ip-default-pool", "", "Default WS target IP pool for implicit DCs, comma-separated")
 	pprofListen := fs.String("pprof-listen", "", "Optional pprof listen address (e.g. 127.0.0.1:6060)")
-	transparentListen := fs.String("transparent-listen", "", "Optional Linux TPROXY listener address (for example 0.0.0.0:1444)")
 	transparentFailOpen := fs.Bool("transparent-fail-open", true, "Forward unrecognized transparent connections to their original destination")
 
 	var dcIPs multiFlag
 	var dcIPPools multiFlag
+	var transparentListen multiFlag
 	var transparentDCMap multiFlag
 	fs.Var(&dcIPs, "dc-ip", "Target DC IP as DC:IP; repeatable")
 	fs.Var(&dcIPPools, "dc-ip-pool", "Target pool as DC:IP1,IP2,...; repeatable")
+	fs.Var(&transparentListen, "transparent-listen", "Linux TPROXY listener address; repeatable for IPv4/IPv6")
 	fs.Var(&transparentDCMap, "transparent-dc-map", "Map original destination to Telegram DC as DC:CIDR; repeatable")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -55,11 +58,15 @@ func parseFlags(args []string) (*Config, error) {
 	provided := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { provided[f.Name] = true })
 
+	if *printLink && *noMTProxyListener {
+		return nil, errors.New("--print-link cannot be used with --no-mtproxy-listener")
+	}
 	if *printLink && *secret == "" {
 		return nil, errors.New("--print-link requires --secret")
 	}
 
-	if *secret == "" {
+	needSecret := !*noMTProxyListener || *genSecret || *printLink || strings.TrimSpace(*secret) != ""
+	if needSecret && *secret == "" {
 		b := make([]byte, 16)
 		if _, err := rand.Read(b); err != nil {
 			return nil, err
@@ -69,11 +76,19 @@ func parseFlags(args []string) (*Config, error) {
 			log.Printf("INFO   Generated secret: %s", *secret)
 		}
 	}
-	if len(*secret) != 32 {
-		return nil, errors.New("secret must be exactly 32 hex chars")
+	if *secret != "" {
+		if len(*secret) != 32 {
+			return nil, errors.New("secret must be exactly 32 hex chars")
+		}
+		if _, err := hex.DecodeString(*secret); err != nil {
+			return nil, errors.New("secret must be valid hex")
+		}
 	}
-	if _, err := hex.DecodeString(*secret); err != nil {
-		return nil, errors.New("secret must be valid hex")
+	if *outboundMark > uint(^uint32(0)) {
+		return nil, errors.New("--outbound-mark must fit in uint32")
+	}
+	if err := validateOutboundMark(uint32(*outboundMark)); err != nil {
+		return nil, err
 	}
 
 	defaultTargetIP := strings.TrimSpace(*dcIPDefault)
@@ -174,10 +189,36 @@ func parseFlags(args []string) (*Config, error) {
 		workerDomains = wd
 	}
 
-	transparentAddress := strings.TrimSpace(*transparentListen)
-	if transparentAddress != "" {
-		if _, err := transparentListenNetwork(transparentAddress); err != nil {
+	transparentAddresses := make([]string, 0, len(transparentListen))
+	for _, raw := range transparentListen {
+		address := strings.TrimSpace(raw)
+		if address == "" {
+			return nil, errors.New("--transparent-listen cannot be empty")
+		}
+		if _, err := transparentListenNetwork(address); err != nil {
 			return nil, err
+		}
+		found := false
+		for _, existing := range transparentAddresses {
+			if existing == address {
+				found = true
+				break
+			}
+		}
+		if !found {
+			transparentAddresses = append(transparentAddresses, address)
+		}
+	}
+	if *noMTProxyListener && len(transparentAddresses) == 0 {
+		return nil, errors.New("--no-mtproxy-listener requires at least one --transparent-listen")
+	}
+	if !*noMTProxyListener {
+		for _, address := range transparentAddresses {
+			_, portText, _ := net.SplitHostPort(address)
+			transparentPort, _ := strconv.Atoi(portText)
+			if transparentPort == *port {
+				return nil, fmt.Errorf("--transparent-listen port %d conflicts with --port", transparentPort)
+			}
 		}
 	}
 	if err := validateTransparentDCMappings(transparentDCMap); err != nil {
@@ -187,6 +228,8 @@ func parseFlags(args []string) (*Config, error) {
 	cfg := &Config{
 		Host:                         *host,
 		Port:                         *port,
+		NoMTProxyListener:            *noMTProxyListener,
+		OutboundMark:                 uint32(*outboundMark),
 		SecretHex:                    *secret,
 		GenSecret:                    *genSecret,
 		PrintLink:                    *printLink,
@@ -211,7 +254,7 @@ func parseFlags(args []string) (*Config, error) {
 		LogMaxMB:                     *logMaxMB,
 		LogBackups:                   maxInt(*logBackups, 0),
 		PprofListen:                  strings.TrimSpace(*pprofListen),
-		TransparentListen:            transparentAddress,
+		TransparentListen:            append([]string(nil), transparentAddresses...),
 		TransparentFailOpen:          *transparentFailOpen,
 		TransparentDCMap:             append([]string(nil), transparentDCMap...),
 	}
