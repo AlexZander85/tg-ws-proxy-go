@@ -66,9 +66,19 @@ EXTRA_ARGS="--dc-ip-pool 2:149.154.175.50,149.154.167.220"
 # Переопределение одним IP для отдельного DC (DC203) + логи
 EXTRA_ARGS="--dc-ip 203:91.105.192.100 -v"
 
-# Режим Fake TLS (ee-secret)
+# Fake TLS mode (ee-secret)
 FAKE_TLS_DOMAIN="example.com"
 ```
+
+### Прозрачный режим (Linux TPROXY)
+
+Опциональный transparent listener перехватывает прямые подключения Telegram, декодирует direct obfuscated2 handshake и передаёт сессию в тот же WebSocket/CF/TCP pipeline. Настраивать прокси в Telegram не требуется.
+
+```conf
+EXTRA_ARGS="--transparent-listen 0.0.0.0:1444"
+```
+
+Firewall и policy routing намеренно не настраиваются бинарником. Требуются Linux, `CAP_NET_ADMIN` и внешние TPROXY-правила. Подробности и пример nftables: [docs/transparent.md](docs/transparent.md).
 
 ### Запуск
 
