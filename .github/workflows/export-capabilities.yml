@@ -1,0 +1,22 @@
+name: Export capabilities checkout
+
+on:
+  pull_request:
+    branches:
+      - main-go
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Pack checkout
+        run: tar --exclude=.git -czf "$RUNNER_TEMP/tg-ws-proxy-go.tgz" .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tg-ws-proxy-go-capabilities-checkout
+          path: ${{ runner.temp }}/tg-ws-proxy-go.tgz
+          retention-days: 1
