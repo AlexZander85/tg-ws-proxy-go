@@ -15,6 +15,7 @@ opkg install tg-ws-proxy
 opkg install %link%
 ```
 > APK
+
 ```shell
 wget -O "/etc/apk/keys/tg-ws-proxy.pem" "https://github.com/spatiumstas/tg-ws-proxy-go/releases/latest/download/tg-ws-proxy.pem"
 wget -O /tmp/tg-ws-proxy.apk %link%
@@ -69,6 +70,47 @@ EXTRA_ARGS="--dc-ip 203:91.105.192.100 -v"
 # Режим Fake TLS (ee-secret)
 FAKE_TLS_DOMAIN="example.com"
 ```
+
+### Прозрачный MTProto → WebSocket bridge (Linux)
+
+Опциональный transparent listener принимает перенаправленные через TPROXY прямые TCP-соединения Telegram, распознаёт transport `obfuscated2` и отправляет их через тот же WebSocket/Cloudflare/TCP pipeline. Настраивать `tg://proxy` и `SECRET` на телефонах и компьютерах в локальной сети не требуется.
+
+Режим выключен по умолчанию и не изменяет firewall самостоятельно:
+
+```conf
+EXTRA_ARGS="--transparent-port 16080"
+```
+
+Доступные параметры:
+
+```text
+--transparent-host 0.0.0.0
+--transparent-port 16080
+--transparent-fail-open=true
+```
+
+`--transparent-fail-open=true` напрямую подключает нераспознанный TCP-поток к его исходному назначению и повторно отправляет уже прочитанный префикс. Для строгого режима используйте `--transparent-fail-open=false`.
+
+Минимальный пример для nftables (список Telegram CIDR и имя LAN-интерфейса необходимо поддерживать в актуальном состоянии):
+
+```shell
+nft add table inet tgws
+nft 'add set inet tgws telegram4 { type ipv4_addr; flags interval; }'
+nft 'add element inet tgws telegram4 { 149.154.160.0/20, 91.108.4.0/22, 91.108.8.0/22, 91.108.12.0/22, 91.108.16.0/22, 91.108.20.0/22, 91.108.56.0/22 }'
+nft 'add chain inet tgws prerouting { type filter hook prerouting priority mangle; policy accept; }'
+nft 'add rule inet tgws prerouting iifname "br-lan" ip daddr @telegram4 meta l4proto tcp meta mark set 0x4100 tproxy to :16080 accept'
+
+ip rule add fwmark 0x4100 lookup 252
+ip route add local 0.0.0.0/0 dev lo table 252
+```
+
+Перехватывайте только forwarded-трафик с LAN в `prerouting`. Не направляйте в этот listener локальный `output` самого роутера: исходящие WS/CF-соединения и fail-open должны свободно выходить наружу. Для запуска listener требуются права root или соответствующие capabilities и поддержка TPROXY в ядре; в OpenWrt обычно нужен `kmod-nft-tproxy`.
+
+Ограничения режима:
+
+- обрабатывается только TCP MTProto `obfuscated2`;
+- Telegram voice/video calls и другой UDP-трафик не проходят через bridge;
+- выбор целевых адресов и firewall-политики остаются ответственностью администратора роутера.
 
 ### Запуск
 
