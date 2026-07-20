@@ -10,6 +10,7 @@ import (
 type Config struct {
 	Host                         string
 	Port                         int
+	PrintCapabilities            bool
 	NoMTProxyListener            bool
 	OutboundMark                 uint32
 	SecretHex                    string

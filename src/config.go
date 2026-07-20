@@ -18,6 +18,7 @@ func parseFlags(args []string) (*Config, error) {
 	fs.SetOutput(io.Discard)
 	host := fs.String("host", "127.0.0.1", "Listen host")
 	port := fs.Int("port", 1443, "Listen port")
+	printCapabilities := fs.Bool("capabilities", false, "Print machine-readable JSON capabilities and exit")
 	noMTProxyListener := fs.Bool("no-mtproxy-listener", false, "Disable the explicit secret-based MTProxy listener")
 	outboundMark := fs.Uint("outbound-mark", 0, "Linux SO_MARK value for all upstream proxy sockets (decimal or 0x-prefixed)")
 	secret := fs.String("secret", "", "MTProto secret (32 hex chars)")
@@ -53,6 +54,9 @@ func parseFlags(args []string) (*Config, error) {
 	fs.Var(&transparentDCMap, "transparent-dc-map", "Map original destination to Telegram DC as DC:CIDR; repeatable")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
+	}
+	if *printCapabilities {
+		return &Config{PrintCapabilities: true}, nil
 	}
 
 	provided := map[string]bool{}

@@ -21,6 +21,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("config error: %v", err)
 	}
+	if cfg.PrintCapabilities {
+		if err := writeCapabilities(os.Stdout); err != nil {
+			log.Fatalf("capabilities error: %v", err)
+		}
+		return
+	}
 	if cfg.GenSecret {
 		fmt.Println(cfg.SecretHex)
 		return

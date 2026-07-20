@@ -42,6 +42,16 @@ func TestParseFlagsDefaults(t *testing.T) {
 	}
 }
 
+func TestParseFlagsCapabilities(t *testing.T) {
+	cfg := mustParse(t, "-capabilities")
+	if !cfg.PrintCapabilities {
+		t.Fatal("capabilities mode was not enabled")
+	}
+	if cfg.SecretHex != "" {
+		t.Fatalf("capabilities mode generated a secret: %q", cfg.SecretHex)
+	}
+}
+
 func TestParseFlagsGenSecret(t *testing.T) {
 	cfg := mustParse(t, "-gen-secret")
 	if !cfg.GenSecret || len(cfg.SecretHex) != 32 {
