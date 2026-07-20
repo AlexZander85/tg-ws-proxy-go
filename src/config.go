@@ -39,11 +39,16 @@ func parseFlags(args []string) (*Config, error) {
 	dcIPDefault := fs.String("dc-ip-default", "149.154.167.220", "Default WS target IP for all implicit DCs when --dc-ip is not provided")
 	dcIPDefaultPool := fs.String("dc-ip-default-pool", "", "Default WS target IP pool for implicit DCs, comma-separated")
 	pprofListen := fs.String("pprof-listen", "", "Optional pprof listen address (e.g. 127.0.0.1:6060)")
+	transparentListen := fs.String("transparent-listen", "", "Optional Linux TPROXY listener address (e.g. 0.0.0.0:16080)")
+	transparentBypassMark := fs.Uint("transparent-bypass-mark", 0, "SO_MARK value for upstream sockets in transparent mode (decimal or 0x-prefixed)")
+	transparentFailOpen := fs.Bool("transparent-fail-open", true, "Relay unrecognized transparent connections directly to their original destination")
 
 	var dcIPs multiFlag
 	var dcIPPools multiFlag
+	var transparentDCMaps multiFlag
 	fs.Var(&dcIPs, "dc-ip", "Target DC IP as DC:IP; repeatable")
 	fs.Var(&dcIPPools, "dc-ip-pool", "Target pool as DC:IP1,IP2,...; repeatable")
+	fs.Var(&transparentDCMaps, "transparent-dc-map", "Original-destination mapping as DC=IP_OR_CIDR; repeatable")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
@@ -170,6 +175,25 @@ func parseFlags(args []string) (*Config, error) {
 		workerDomains = wd
 	}
 
+	normalizedTransparentListen := strings.TrimSpace(*transparentListen)
+	if normalizedTransparentListen != "" {
+		_, portText, err := net.SplitHostPort(normalizedTransparentListen)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --transparent-listen: %w", err)
+		}
+		listenPort, err := strconv.Atoi(portText)
+		if err != nil || listenPort < 1 || listenPort > 65535 {
+			return nil, fmt.Errorf("invalid --transparent-listen port: %s", portText)
+		}
+	}
+	if uint64(*transparentBypassMark) > uint64(^uint32(0)) {
+		return nil, errors.New("--transparent-bypass-mark must fit in 32 bits")
+	}
+	transparentRules, err := parseTransparentDCRules(transparentDCMaps)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 		Host:                         *host,
 		Port:                         *port,
@@ -197,6 +221,10 @@ func parseFlags(args []string) (*Config, error) {
 		LogMaxMB:                     *logMaxMB,
 		LogBackups:                   maxInt(*logBackups, 0),
 		PprofListen:                  strings.TrimSpace(*pprofListen),
+		TransparentListen:            normalizedTransparentListen,
+		TransparentBypassMark:        uint32(*transparentBypassMark),
+		TransparentFailOpen:          *transparentFailOpen,
+		TransparentDCRules:           transparentRules,
 	}
 
 	cfg.setCFProxyDomains(domainPool)
