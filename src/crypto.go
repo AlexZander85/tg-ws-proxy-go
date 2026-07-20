@@ -12,6 +12,14 @@ import (
 )
 
 func tryHandshake(handshake, secret []byte) (*handshakeInfo, bool) {
+	return tryHandshakeWithMode(handshake, secret, false)
+}
+
+func tryDirectHandshake(handshake []byte) (*handshakeInfo, bool) {
+	return tryHandshakeWithMode(handshake, nil, true)
+}
+
+func tryHandshakeWithMode(handshake, secret []byte, direct bool) (*handshakeInfo, bool) {
 	if len(handshake) != handshakeLen {
 		return nil, false
 	}
@@ -19,8 +27,12 @@ func tryHandshake(handshake, secret []byte) (*handshakeInfo, bool) {
 	decPrekey := decPrekeyAndIV[:prekeyLen]
 	decIV := decPrekeyAndIV[prekeyLen:]
 
-	h := keyFromPrekeyAndSecret(decPrekey, secret)
-	block, err := aes.NewCipher(h[:])
+	key := decPrekey
+	if !direct {
+		h := keyFromPrekeyAndSecret(decPrekey, secret)
+		key = h[:]
+	}
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, false
 	}
@@ -41,7 +53,7 @@ func tryHandshake(handshake, secret []byte) (*handshakeInfo, bool) {
 	copy(pt, protoTag)
 	civ := make([]byte, len(decPrekeyAndIV))
 	copy(civ, decPrekeyAndIV)
-	return &handshakeInfo{DC: dc, IsMedia: isMedia, ProtoTag: pt, ClientDecI: civ}, true
+	return &handshakeInfo{DC: dc, IsMedia: isMedia, Direct: direct, ProtoTag: pt, ClientDecI: civ}, true
 }
 
 func generateRelayInit(protoTag []byte, dcIdx int16) []byte {
@@ -89,10 +101,22 @@ func generateRelayInit(protoTag []byte, dcIdx int16) []byte {
 }
 
 func buildCiphers(clientDecPrekeyAndIV, relayInit, secret []byte) (cltDec, cltEnc, tgEnc, tgDec cipher.Stream, err error) {
+	return buildCiphersWithMode(clientDecPrekeyAndIV, relayInit, secret, false)
+}
+
+func buildDirectCiphers(clientDecPrekeyAndIV, relayInit []byte) (cltDec, cltEnc, tgEnc, tgDec cipher.Stream, err error) {
+	return buildCiphersWithMode(clientDecPrekeyAndIV, relayInit, nil, true)
+}
+
+func buildCiphersWithMode(clientDecPrekeyAndIV, relayInit, secret []byte, direct bool) (cltDec, cltEnc, tgEnc, tgDec cipher.Stream, err error) {
 	cltDecPrekey := clientDecPrekeyAndIV[:prekeyLen]
 	cltDecIV := clientDecPrekeyAndIV[prekeyLen:]
-	k1 := keyFromPrekeyAndSecret(cltDecPrekey, secret)
-	b1, err := aes.NewCipher(k1[:])
+	cltDecKey := cltDecPrekey
+	if !direct {
+		k1 := keyFromPrekeyAndSecret(cltDecPrekey, secret)
+		cltDecKey = k1[:]
+	}
+	b1, err := aes.NewCipher(cltDecKey)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -101,8 +125,12 @@ func buildCiphers(clientDecPrekeyAndIV, relayInit, secret []byte) (cltDec, cltEn
 	rev := reverseBytes(clientDecPrekeyAndIV)
 	encPrekey := rev[:prekeyLen]
 	encIV := rev[prekeyLen:]
-	k2 := keyFromPrekeyAndSecret(encPrekey, secret)
-	b2, err := aes.NewCipher(k2[:])
+	cltEncKey := encPrekey
+	if !direct {
+		k2 := keyFromPrekeyAndSecret(encPrekey, secret)
+		cltEncKey = k2[:]
+	}
+	b2, err := aes.NewCipher(cltEncKey)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
