@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/transparent-mtproto-ws
+  pull_request:
+    branches:
+      - main-go
 
 permissions:
   contents: read
