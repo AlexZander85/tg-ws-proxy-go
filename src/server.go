@@ -36,19 +36,28 @@ func main() {
 	}
 
 	initLogger(cfg)
+	if err := configureOutboundMark(cfg.OutboundMark); err != nil {
+		log.Fatalf("outbound mark error: %v", err)
+	}
 	startPprof(cfg)
 	startCFProxyDomainRefresh(cfg)
 
-	linkHost := getLinkHost(cfg.Host)
 	log.Printf("INFO   %s", strings.Repeat("=", 60))
 	log.Printf("INFO     Telegram MTProto WS Bridge Proxy (Go)")
-	log.Printf("INFO     Listening on   %s:%d", cfg.Host, cfg.Port)
-	log.Printf("INFO     Secret:        %s", cfg.SecretHex)
-	if cfg.FakeTLSDomain != "" {
-		log.Printf("INFO     Fake TLS:      %s", cfg.FakeTLSDomain)
+	if !cfg.NoMTProxyListener {
+		log.Printf("INFO     MTProxy:       %s:%d", cfg.Host, cfg.Port)
+		log.Printf("INFO     Secret:        %s", cfg.SecretHex)
+		if cfg.FakeTLSDomain != "" {
+			log.Printf("INFO     Fake TLS:      %s", cfg.FakeTLSDomain)
+		}
+	} else {
+		log.Printf("INFO     MTProxy:       disabled")
 	}
-	if cfg.TransparentListen != "" {
-		log.Printf("INFO     Transparent:   %s (TPROXY, fail-open=%t)", cfg.TransparentListen, cfg.TransparentFailOpen)
+	for _, address := range cfg.TransparentListen {
+		log.Printf("INFO     Transparent:   %s (TPROXY, fail-open=%t)", address, cfg.TransparentFailOpen)
+	}
+	if cfg.OutboundMark != 0 {
+		log.Printf("INFO     Outbound mark: 0x%x", cfg.OutboundMark)
 	}
 	log.Printf("INFO     Target DC IPs:")
 	for _, item := range sortedDCMap(cfg.DCMap) {
@@ -69,12 +78,15 @@ func main() {
 	if cfg.hasCFProxyWorkerDomains() {
 		log.Printf("INFO     CF worker:     %s (tried first)", strings.Join(cfg.FallbackCFProxyWorkerDomains, ", "))
 	}
-	log.Printf("INFO   %s", strings.Repeat("=", 60))
-	log.Printf("INFO     Connect link:")
-	if cfg.FakeTLSDomain != "" {
-		log.Printf("INFO       %s", fakeTLSConnectLink(linkHost, cfg.Port, cfg.SecretHex, cfg.FakeTLSDomain))
-	} else {
-		log.Printf("INFO       tg://proxy?server=%s&port=%d&secret=dd%s", linkHost, cfg.Port, cfg.SecretHex)
+	if !cfg.NoMTProxyListener {
+		linkHost := getLinkHost(cfg.Host)
+		log.Printf("INFO   %s", strings.Repeat("=", 60))
+		log.Printf("INFO     Connect link:")
+		if cfg.FakeTLSDomain != "" {
+			log.Printf("INFO       %s", fakeTLSConnectLink(linkHost, cfg.Port, cfg.SecretHex, cfg.FakeTLSDomain))
+		} else {
+			log.Printf("INFO       tg://proxy?server=%s&port=%d&secret=dd%s", linkHost, cfg.Port, cfg.SecretHex)
+		}
 	}
 	log.Printf("INFO   %s", strings.Repeat("=", 60))
 
@@ -86,10 +98,14 @@ func main() {
 	}()
 
 	warmupPool(cfg)
-	if cfg.TransparentListen != "" {
-		if err := startTransparentServer(cfg); err != nil {
+	sessionsSem := make(chan struct{}, cfg.MaxConns)
+	if len(cfg.TransparentListen) > 0 {
+		if err := startTransparentServers(cfg, sessionsSem); err != nil {
 			log.Fatalf("transparent listener error: %v", err)
 		}
+	}
+	if cfg.NoMTProxyListener {
+		select {}
 	}
 
 	ln, err := net.Listen("tcp", net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)))
@@ -99,8 +115,6 @@ func main() {
 	defer ln.Close()
 
 	secret, _ := hex.DecodeString(cfg.SecretHex)
-	sessionsSem := make(chan struct{}, cfg.MaxConns)
-
 	acceptBackoff := acceptBackoffMin
 	tcpLn, _ := ln.(*net.TCPListener)
 
