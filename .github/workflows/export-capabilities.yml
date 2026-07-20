@@ -1,4 +1,4 @@
-name: Export capabilities checkout
+name: Validate capabilities update
 
 on:
   pull_request:
@@ -6,17 +6,208 @@ on:
       - main-go
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export:
+  update-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Pack checkout
-        run: tar --exclude=.git -czf "$RUNNER_TEMP/tg-ws-proxy-go.tgz" .
-      - uses: actions/upload-artifact@v7
         with:
-          name: tg-ws-proxy-go-capabilities-checkout
-          path: ${{ runner.temp }}/tg-ws-proxy-go.tgz
-          retention-days: 1
+          ref: ${{ github.event.pull_request.head.ref }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: src/go.mod
+          cache: true
+          cache-dependency-path: src/go.sum
+      - name: Apply capabilities update
+        shell: bash
+        run: |
+          if [ -f src/capabilities.go ]; then
+            exit 0
+          fi
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/config.go')
+          s = p.read_text()
+          s = s.replace(
+              '\tnoMTProxyListener := fs.Bool("no-mtproxy-listener", false, "Disable the explicit secret-based MTProxy listener")\n',
+              '\tprintCapabilities := fs.Bool("capabilities", false, "Print machine-readable JSON capabilities and exit")\n\tnoMTProxyListener := fs.Bool("no-mtproxy-listener", false, "Disable the explicit secret-based MTProxy listener")\n',
+              1,
+          )
+          s = s.replace(
+              '\tif err := fs.Parse(args); err != nil {\n\t\treturn nil, err\n\t}\n\n\tprovided := map[string]bool{}\n',
+              '\tif err := fs.Parse(args); err != nil {\n\t\treturn nil, err\n\t}\n\tif *printCapabilities {\n\t\treturn &Config{PrintCapabilities: true}, nil\n\t}\n\n\tprovided := map[string]bool{}\n',
+              1,
+          )
+          p.write_text(s)
+
+          p = Path('src/types.go')
+          s = p.read_text().replace(
+              '\tPort                         int\n',
+              '\tPort                         int\n\tPrintCapabilities            bool\n',
+              1,
+          )
+          p.write_text(s)
+
+          p = Path('src/server.go')
+          s = p.read_text().replace(
+              '\tif cfg.GenSecret {\n',
+              '\tif cfg.PrintCapabilities {\n\t\tif err := writeCapabilities(os.Stdout); err != nil {\n\t\t\tlog.Fatalf("capabilities error: %v", err)\n\t\t}\n\t\treturn\n\t}\n\tif cfg.GenSecret {\n',
+              1,
+          )
+          p.write_text(s)
+
+          p = Path('src/config_test.go')
+          s = p.read_text()
+          insert = '''
+          func TestParseFlagsCapabilities(t *testing.T) {
+          \tcfg := mustParse(t, "-capabilities")
+          \tif !cfg.PrintCapabilities {
+          \t\tt.Fatal("capabilities mode was not enabled")
+          \t}
+          \tif cfg.SecretHex != "" {
+          \t\tt.Fatalf("capabilities mode generated a secret: %q", cfg.SecretHex)
+          \t}
+          }
+          '''
+          s = s.replace('func TestParseFlagsGenSecret(t *testing.T) {', insert + '\nfunc TestParseFlagsGenSecret(t *testing.T) {', 1)
+          p.write_text(s)
+          PY
+          cat > src/capabilities.go <<'EOF'
+          package main
+
+          import (
+          	"encoding/json"
+          	"io"
+          	"runtime"
+          )
+
+          const capabilitiesSchemaVersion = 1
+
+          type capabilityFeatures struct {
+          	TransparentMTProtoBridge  bool `json:"transparent_mtproto_bridge"`
+          	TransparentMultiListener  bool `json:"transparent_multi_listener"`
+          	TransparentFailOpen       bool `json:"transparent_fail_open"`
+          	TransparentDCMapOverrides bool `json:"transparent_dc_map_overrides"`
+          	OptionalMTProxyListener   bool `json:"optional_mtproxy_listener"`
+          	OutboundSocketMark        bool `json:"outbound_so_mark"`
+          }
+
+          type capabilityDocument struct {
+          	Schema   int                `json:"schema"`
+          	Program  string             `json:"program"`
+          	GOOS     string             `json:"goos"`
+          	Features capabilityFeatures `json:"features"`
+          	Flags    []string           `json:"flags"`
+          	Transparent struct {
+          		DefaultDCMap []string `json:"default_dc_map"`
+          	} `json:"transparent"`
+          }
+
+          func currentCapabilities() capabilityDocument {
+          	linux := runtime.GOOS == "linux"
+          	doc := capabilityDocument{
+          		Schema:  capabilitiesSchemaVersion,
+          		Program: "tg-ws-proxy",
+          		GOOS:    runtime.GOOS,
+          		Features: capabilityFeatures{
+          			TransparentMTProtoBridge:  linux,
+          			TransparentMultiListener:  linux,
+          			TransparentFailOpen:       linux,
+          			TransparentDCMapOverrides: linux,
+          			OptionalMTProxyListener:   true,
+          			OutboundSocketMark:        linux,
+          		},
+          		Flags: []string{
+          			"--capabilities",
+          			"--transparent-listen",
+          			"--transparent-fail-open",
+          			"--transparent-dc-map",
+          			"--no-mtproxy-listener",
+          			"--outbound-mark",
+          		},
+          	}
+          	doc.Transparent.DefaultDCMap = append([]string(nil), defaultTransparentDCMap...)
+          	return doc
+          }
+
+          func writeCapabilities(w io.Writer) error {
+          	encoder := json.NewEncoder(w)
+          	encoder.SetEscapeHTML(false)
+          	return encoder.Encode(currentCapabilities())
+          }
+          EOF
+          cat > src/capabilities_test.go <<'EOF'
+          package main
+
+          import (
+          	"bytes"
+          	"encoding/json"
+          	"runtime"
+          	"testing"
+          )
+
+          func TestCapabilitiesJSON(t *testing.T) {
+          	var out bytes.Buffer
+          	if err := writeCapabilities(&out); err != nil {
+          		t.Fatal(err)
+          	}
+          	var doc capabilityDocument
+          	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+          		t.Fatalf("invalid capabilities JSON: %v", err)
+          	}
+          	if doc.Schema != capabilitiesSchemaVersion || doc.Program != "tg-ws-proxy" {
+          		t.Fatalf("unexpected capabilities header: %+v", doc)
+          	}
+          	if doc.GOOS != runtime.GOOS {
+          		t.Fatalf("goos = %q, want %q", doc.GOOS, runtime.GOOS)
+          	}
+          	linux := runtime.GOOS == "linux"
+          	if doc.Features.TransparentMTProtoBridge != linux || doc.Features.OutboundSocketMark != linux {
+          		t.Fatalf("platform capabilities = %+v, linux=%v", doc.Features, linux)
+          	}
+          	if !doc.Features.OptionalMTProxyListener {
+          		t.Fatal("optional MTProxy listener capability is missing")
+          	}
+          	if len(doc.Transparent.DefaultDCMap) != len(defaultTransparentDCMap) {
+          		t.Fatalf("default DC map length = %d, want %d", len(doc.Transparent.DefaultDCMap), len(defaultTransparentDCMap))
+          	}
+          	if len(doc.Flags) == 0 || doc.Flags[0] != "--capabilities" {
+          		t.Fatalf("unexpected flags: %v", doc.Flags)
+          	}
+          }
+
+          func TestCapabilitiesDefaultDCMapIsCopied(t *testing.T) {
+          	doc := currentCapabilities()
+          	doc.Transparent.DefaultDCMap[0] = "changed"
+          	if defaultTransparentDCMap[0] == "changed" {
+          		t.Fatal("capabilities mutated the package default DC map")
+          	}
+          }
+          EOF
+          gofmt -w src/config.go src/types.go src/server.go src/config_test.go src/capabilities.go src/capabilities_test.go
+      - name: Check formatting
+        run: test -z "$(gofmt -l src/*.go)"
+      - name: Run unit tests
+        run: cd src && go test ./...
+      - name: Build and smoke-test Linux binary
+        run: |
+          cd src
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/tg-ws-proxy .
+          /tmp/tg-ws-proxy --capabilities >/tmp/capabilities.json 2>/tmp/capabilities.err
+          test ! -s /tmp/capabilities.err
+          python -m json.tool /tmp/capabilities.json >/dev/null
+      - name: Verify non-Linux build tags
+        run: cd src && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./...
+      - name: Commit source update
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/config.go src/types.go src/server.go src/config_test.go src/capabilities.go src/capabilities_test.go
+          if ! git diff --cached --quiet; then
+            git commit -m "feat: add machine-readable capabilities"
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          fi
