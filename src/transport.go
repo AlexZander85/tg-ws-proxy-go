@@ -23,6 +23,13 @@ var ioBufPool = sync.Pool{
 	},
 }
 
+func newUpstreamTLSConfig(serverName string) *tls.Config {
+	return &tls.Config{
+		ServerName: serverName,
+		MinVersion: tls.VersionTLS12,
+	}
+}
+
 func dialWS(targetIP, domain string, timeout time.Duration) (*websocket.Conn, *http.Response, error) {
 	return dialWSWithSNI(targetIP, domain, domain, timeout)
 }
@@ -36,10 +43,7 @@ func dialWSWithSNI(targetIP, domain, sni string, timeout time.Duration) (*websoc
 	dialer := websocket.Dialer{
 		HandshakeTimeout: timeout,
 		Subprotocols:     []string{"binary"},
-		TLSClientConfig: &tls.Config{
-			ServerName:         sni,
-			InsecureSkipVerify: true,
-		},
+		TLSClientConfig:  newUpstreamTLSConfig(sni),
 		NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return newUpstreamDialer(timeout).DialContext(ctx, "tcp", net.JoinHostPort(targetIP, "443"))
 		},
@@ -362,10 +366,7 @@ func dialWSByDomain(domain string, timeout time.Duration) (*websocket.Conn, *htt
 	dialer := websocket.Dialer{
 		HandshakeTimeout: timeout,
 		Subprotocols:     []string{"binary"},
-		TLSClientConfig: &tls.Config{
-			ServerName:         domain,
-			InsecureSkipVerify: true,
-		},
+		TLSClientConfig:  newUpstreamTLSConfig(domain),
 		NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return newUpstreamDialer(timeout).DialContext(ctx, network, addr)
 		},
@@ -384,10 +385,7 @@ func dialWSWorker(worker, dst string, dc int, timeout time.Duration) (*websocket
 	dialer := websocket.Dialer{
 		HandshakeTimeout: timeout,
 		Subprotocols:     []string{"binary"},
-		TLSClientConfig: &tls.Config{
-			ServerName:         worker,
-			InsecureSkipVerify: true,
-		},
+		TLSClientConfig:  newUpstreamTLSConfig(worker),
 		NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return newUpstreamDialer(timeout).DialContext(ctx, network, addr)
 		},
