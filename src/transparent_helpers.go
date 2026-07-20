@@ -96,3 +96,19 @@ func transparentDCForIPRange(ip net.IP) (int, bool) {
 	}
 	return 0, false
 }
+
+func resolveTransparentDC(cfg *Config, ip net.IP, handshakeDC int, handshakeMedia bool) (dc int, media bool, source string, ok bool) {
+	handshakeValid := validTransparentDC(handshakeDC)
+
+	if mapped, found := transparentDCForIP(cfg, ip); found {
+		preserveMedia := handshakeValid && handshakeDC == mapped && handshakeMedia
+		return mapped, preserveMedia, "destination", true
+	}
+	if handshakeValid {
+		return handshakeDC, handshakeMedia, "handshake", true
+	}
+	if mapped, found := transparentDCForIPRange(ip); found {
+		return mapped, false, "destination-range", true
+	}
+	return 0, false, "", false
+}
