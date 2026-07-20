@@ -1,0 +1,26 @@
+name: Transparent bridge validation
+
+on:
+  push:
+    branches:
+      - agent/transparent-mtproto-bridge
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: src/go.mod
+          cache: true
+          cache-dependency-path: src/go.sum
+      - name: Run unit tests
+        run: cd src && go test ./...
+      - name: Build Linux binary
+        run: cd src && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...
+      - name: Verify non-Linux build tags
+        run: cd src && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./...
