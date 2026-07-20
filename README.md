@@ -75,8 +75,10 @@ FAKE_TLS_DOMAIN="example.com"
 Опциональный transparent listener перехватывает прямые подключения Telegram, декодирует direct obfuscated2 handshake и передаёт сессию в тот же WebSocket/CF/TCP pipeline. Настраивать прокси в Telegram не требуется.
 
 ```conf
-EXTRA_ARGS="--transparent-listen 0.0.0.0:1444"
+EXTRA_ARGS="--no-mtproxy-listener --transparent-listen 0.0.0.0:1444 --outbound-mark 0x8000"
 ```
+
+`--transparent-listen` можно повторить для отдельных IPv4/IPv6 listener. `--outbound-mark` ставит отдельный Linux `SO_MARK` на все upstream-сокеты и позволяет исключить трафик самого proxy из OUTPUT/TPROXY. Этот bypass-mark должен отличаться от TPROXY routing mark, для которого установлено `ip rule ... lookup local`. Без `--no-mtproxy-listener` обычный `tg://proxy` listener продолжает работать параллельно.
 
 Firewall и policy routing намеренно не настраиваются бинарником. Требуются Linux, `CAP_NET_ADMIN` и внешние TPROXY-правила. Подробности и пример nftables: [docs/transparent.md](docs/transparent.md).
 
