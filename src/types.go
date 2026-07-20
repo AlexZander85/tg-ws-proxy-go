@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,23 +35,34 @@ type Config struct {
 	LogMaxMB                     float64
 	LogBackups                   int
 	PprofListen                  string
+	TransparentListen            string
+	TransparentBypassMark        uint32
+	TransparentFailOpen          bool
+	TransparentDCRules           []transparentDCRule
 	cfproxyMu                    sync.RWMutex
 	cfproxyFailUntil             map[string]time.Time
 }
 
+type transparentDCRule struct {
+	DC      int
+	Network *net.IPNet
+}
+
 type Stats struct {
-	connectionsTotal  int64
-	connectionsActive int64
-	connectionsWS     int64
-	connectionsTCP    int64
-	connectionsCF     int64
-	connectionsFront  int64
-	connectionsBad    int64
-	wsErrors          int64
-	bytesUp           int64
-	bytesDown         int64
-	poolHits          int64
-	poolMisses        int64
+	connectionsTotal       int64
+	connectionsActive      int64
+	connectionsWS          int64
+	connectionsTCP         int64
+	connectionsCF          int64
+	connectionsFront       int64
+	connectionsBad         int64
+	connectionsTransparent int64
+	transparentFailOpen    int64
+	wsErrors               int64
+	bytesUp                 int64
+	bytesDown               int64
+	poolHits                int64
+	poolMisses              int64
 }
 
 func (s *Stats) summary() string {
@@ -62,13 +74,15 @@ func (s *Stats) summary() string {
 		poolS = fmt.Sprintf("%d/%d", hits, poolTotal)
 	}
 	return fmt.Sprintf(
-		"total=%d active=%d ws=%d tcp_fb=%d cf=%d front=%d bad=%d err=%d pool=%s up=%s down=%s",
+		"total=%d active=%d ws=%d tcp_fb=%d cf=%d front=%d transparent=%d failopen=%d bad=%d err=%d pool=%s up=%s down=%s",
 		atomic.LoadInt64(&s.connectionsTotal),
 		atomic.LoadInt64(&s.connectionsActive),
 		atomic.LoadInt64(&s.connectionsWS),
 		atomic.LoadInt64(&s.connectionsTCP),
 		atomic.LoadInt64(&s.connectionsCF),
 		atomic.LoadInt64(&s.connectionsFront),
+		atomic.LoadInt64(&s.connectionsTransparent),
+		atomic.LoadInt64(&s.transparentFailOpen),
 		atomic.LoadInt64(&s.connectionsBad),
 		atomic.LoadInt64(&s.wsErrors),
 		poolS,
@@ -82,6 +96,7 @@ type handshakeInfo struct {
 	IsMedia    bool
 	ProtoTag   []byte
 	ClientDecI []byte
+	Direct     bool
 }
 
 type dcKey struct {
