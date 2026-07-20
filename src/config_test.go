@@ -131,3 +131,41 @@ func TestParseFlagsClamps(t *testing.T) {
 func TestParseFlagsUnknownFlag(t *testing.T) {
 	wantParseErr(t, "-secret", okSecret, "-definitely-not-a-flag")
 }
+
+func TestParseFlagsTransparentOnly(t *testing.T) {
+	cfg := mustParse(t,
+		"-no-mtproxy-listener",
+		"-transparent-listen", "0.0.0.0:1444",
+		"-transparent-listen", "[::]:1444",
+		"-outbound-mark", "0x8000",
+	)
+	if !cfg.NoMTProxyListener || cfg.SecretHex != "" {
+		t.Fatalf("unexpected transparent-only config: %+v", cfg)
+	}
+	if cfg.OutboundMark != 0x8000 {
+		t.Fatalf("outbound mark = %#x, want 0x8000", cfg.OutboundMark)
+	}
+	if len(cfg.TransparentListen) != 2 {
+		t.Fatalf("transparent listeners = %v", cfg.TransparentListen)
+	}
+}
+
+func TestParseFlagsTransparentOnlyRequiresListener(t *testing.T) {
+	wantParseErr(t, "-no-mtproxy-listener")
+	wantParseErr(t, "-no-mtproxy-listener", "-print-link", "-secret", okSecret, "-transparent-listen", "0.0.0.0:1444")
+}
+
+func TestParseFlagsDeduplicatesTransparentListeners(t *testing.T) {
+	cfg := mustParse(t, "-secret", okSecret,
+		"-transparent-listen", "0.0.0.0:1444",
+		"-transparent-listen", "0.0.0.0:1444")
+	if len(cfg.TransparentListen) != 1 {
+		t.Fatalf("transparent listeners = %v", cfg.TransparentListen)
+	}
+}
+
+func TestParseFlagsRejectsListenerPortConflict(t *testing.T) {
+	wantParseErr(t, "-secret", okSecret, "-port", "1444", "-transparent-listen", "0.0.0.0:1444")
+	// A transparent-only process has no explicit listener, so the same nominal port is valid.
+	mustParse(t, "-no-mtproxy-listener", "-port", "1444", "-transparent-listen", "0.0.0.0:1444")
+}
