@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/cipher"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -42,6 +43,9 @@ func main() {
 	log.Printf("INFO   %s", strings.Repeat("=", 60))
 	log.Printf("INFO     Telegram MTProto WS Bridge Proxy (Go)")
 	log.Printf("INFO     Listening on   %s:%d", cfg.Host, cfg.Port)
+	if cfg.TransparentPort > 0 {
+		log.Printf("INFO     Transparent:   %s:%d (fail-open=%v)", cfg.TransparentHost, cfg.TransparentPort, cfg.TransparentFailOpen)
+	}
 	log.Printf("INFO     Secret:        %s", cfg.SecretHex)
 	if cfg.FakeTLSDomain != "" {
 		log.Printf("INFO     Fake TLS:      %s", cfg.FakeTLSDomain)
@@ -91,6 +95,15 @@ func main() {
 
 	secret, _ := hex.DecodeString(cfg.SecretHex)
 	sessionsSem := make(chan struct{}, cfg.MaxConns)
+
+	if cfg.TransparentPort > 0 {
+		transparentLn, err := listenTransparent(cfg.TransparentHost, cfg.TransparentPort)
+		if err != nil {
+			log.Fatalf("transparent listen error: %v", err)
+		}
+		defer transparentLn.Close()
+		go serveTransparent(transparentLn, cfg, secret, sessionsSem)
+	}
 
 	acceptBackoff := acceptBackoffMin
 	tcpLn, _ := ln.(*net.TCPListener)
@@ -185,7 +198,13 @@ func handleMTProtoClient(client net.Conn, cfg *Config, hi *handshakeInfo, secret
 	}
 
 	relayInit := generateRelayInit(hi.ProtoTag, signedDC(hi.DC, hi.IsMedia))
-	cltDec, cltEnc, tgEnc, tgDec, err := buildCiphers(hi.ClientDecI, relayInit, secret)
+	var cltDec, cltEnc, tgEnc, tgDec cipher.Stream
+	var err error
+	if hi.Direct {
+		cltDec, cltEnc, tgEnc, tgDec, err = buildDirectCiphers(hi.ClientDecI, relayInit)
+	} else {
+		cltDec, cltEnc, tgEnc, tgDec, err = buildCiphers(hi.ClientDecI, relayInit, secret)
+	}
 	if err != nil {
 		log.Printf("ERROR  [%s] cipher init failed: %v", label, err)
 		return

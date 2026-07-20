@@ -25,6 +25,12 @@ func TestParseFlagsDefaults(t *testing.T) {
 	if cfg.Host != "127.0.0.1" || cfg.Port != 1443 {
 		t.Errorf("host/port = %s:%d", cfg.Host, cfg.Port)
 	}
+	if cfg.TransparentHost != "0.0.0.0" || cfg.TransparentPort != 0 {
+		t.Errorf("transparent host/port = %s:%d", cfg.TransparentHost, cfg.TransparentPort)
+	}
+	if !cfg.TransparentFailOpen {
+		t.Error("transparent fail-open should be enabled by default")
+	}
 	if cfg.PoolSize != 4 || cfg.MaxConns != defaultMaxConns {
 		t.Errorf("poolSize=%d maxConns=%d", cfg.PoolSize, cfg.MaxConns)
 	}
@@ -113,6 +119,27 @@ func TestParseFlagsFakeTLS(t *testing.T) {
 	if cfg.FakeTLSDomain != "mask.example.com" {
 		t.Errorf("FakeTLSDomain = %q", cfg.FakeTLSDomain)
 	}
+}
+
+func TestParseFlagsTransparent(t *testing.T) {
+	cfg := mustParse(
+		t,
+		"-secret", okSecret,
+		"-transparent-host", "127.0.0.1",
+		"-transparent-port", "16080",
+		"-transparent-fail-open=false",
+	)
+	if cfg.TransparentHost != "127.0.0.1" || cfg.TransparentPort != 16080 {
+		t.Errorf("transparent host/port = %s:%d", cfg.TransparentHost, cfg.TransparentPort)
+	}
+	if cfg.TransparentFailOpen {
+		t.Error("transparent fail-open should be disabled")
+	}
+
+	wantParseErr(t, "-secret", okSecret, "-transparent-port", "-1")
+	wantParseErr(t, "-secret", okSecret, "-transparent-port", "70000")
+	wantParseErr(t, "-secret", okSecret, "-transparent-port", "16080", "-transparent-host", "not-an-ip")
+	wantParseErr(t, "-secret", okSecret, "-port", "16080", "-transparent-port", "16080")
 }
 
 func TestParseFlagsClamps(t *testing.T) {

@@ -18,6 +18,9 @@ func parseFlags(args []string) (*Config, error) {
 	fs.SetOutput(io.Discard)
 	host := fs.String("host", "127.0.0.1", "Listen host")
 	port := fs.Int("port", 1443, "Listen port")
+	transparentHost := fs.String("transparent-host", "0.0.0.0", "Transparent TPROXY listen host (Linux only)")
+	transparentPort := fs.Int("transparent-port", 0, "Transparent TPROXY listen port; 0 disables transparent mode")
+	transparentFailOpen := fs.Bool("transparent-fail-open", true, "Directly relay unrecognized transparent connections to their original destination")
 	secret := fs.String("secret", "", "MTProto secret (32 hex chars)")
 	genSecret := fs.Bool("gen-secret", false, "Generate random secret and print it")
 	printLink := fs.Bool("print-link", false, "Print the tg:// connect link and exit")
@@ -53,6 +56,18 @@ func parseFlags(args []string) (*Config, error) {
 
 	if *printLink && *secret == "" {
 		return nil, errors.New("--print-link requires --secret")
+	}
+	if *transparentPort < 0 || *transparentPort > 65535 {
+		return nil, errors.New("--transparent-port must be between 0 and 65535")
+	}
+	if *transparentPort > 0 {
+		*transparentHost = strings.TrimSpace(*transparentHost)
+		if net.ParseIP(*transparentHost) == nil {
+			return nil, fmt.Errorf("invalid --transparent-host: %s", *transparentHost)
+		}
+		if *transparentPort == *port {
+			return nil, errors.New("--transparent-port must differ from --port")
+		}
 	}
 
 	if *secret == "" {
@@ -173,6 +188,9 @@ func parseFlags(args []string) (*Config, error) {
 	cfg := &Config{
 		Host:                         *host,
 		Port:                         *port,
+		TransparentHost:              *transparentHost,
+		TransparentPort:              *transparentPort,
+		TransparentFailOpen:          *transparentFailOpen,
 		SecretHex:                    *secret,
 		GenSecret:                    *genSecret,
 		PrintLink:                    *printLink,
