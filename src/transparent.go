@@ -160,22 +160,23 @@ func transparentListenNetwork(address string) (string, error) {
 	return "tcp6", nil
 }
 
-func startTransparentServer(cfg *Config) error {
+func startTransparentServers(cfg *Config, sessionsSem chan struct{}) error {
 	resolver, err := newTransparentDCResolver(cfg.TransparentDCMap)
 	if err != nil {
 		return fmt.Errorf("transparent DC map: %w", err)
 	}
-	listener, err := listenTransparent(cfg.TransparentListen)
-	if err != nil {
-		return err
+	for _, address := range cfg.TransparentListen {
+		listener, err := listenTransparent(address)
+		if err != nil {
+			return err
+		}
+		log.Printf("INFO   Transparent listener on %s (TPROXY, fail-open=%t)", address, cfg.TransparentFailOpen)
+		go serveTransparent(listener, cfg, resolver, sessionsSem)
 	}
-	log.Printf("INFO   Transparent listener on %s (TPROXY, fail-open=%t)", cfg.TransparentListen, cfg.TransparentFailOpen)
-	go serveTransparent(listener, cfg, resolver)
 	return nil
 }
 
-func serveTransparent(listener net.Listener, cfg *Config, resolver *transparentDCResolver) {
-	sessionsSem := make(chan struct{}, cfg.MaxConns)
+func serveTransparent(listener net.Listener, cfg *Config, resolver *transparentDCResolver, sessionsSem chan struct{}) {
 	acceptBackoff := acceptBackoffMin
 	for {
 		if tcpListener, ok := listener.(*net.TCPListener); ok {
@@ -221,6 +222,7 @@ func serveTransparent(listener net.Listener, cfg *Config, resolver *transparentD
 
 func handleTransparentClient(client net.Conn, cfg *Config, resolver *transparentDCResolver) {
 	atomic.AddInt64(&stats.connectionsActive, 1)
+	atomic.AddInt64(&stats.connectionsTransparent, 1)
 	defer atomic.AddInt64(&stats.connectionsActive, -1)
 	defer client.Close()
 	_ = setSockOpts(client, cfg.BufKB*1024)
@@ -274,12 +276,13 @@ func transparentFailOpen(client net.Conn, cfg *Config, destination *net.TCPAddr,
 		debugf(cfg, "[%s] transparent drop (%s)", label, reason)
 		return
 	}
-	upstream, err := net.DialTimeout("tcp", destination.String(), tcpDialTimeout)
+	upstream, err := newUpstreamDialer(tcpDialTimeout).Dial("tcp", destination.String())
 	if err != nil {
 		debugf(cfg, "[%s] transparent fail-open dial failed (%s): %v", label, reason, err)
 		return
 	}
 	defer upstream.Close()
+	_ = setSockOpts(upstream, cfg.BufKB*1024)
 	if len(prefix) > 0 {
 		if err := writeTransparentFull(upstream, prefix); err != nil {
 			debugf(cfg, "[%s] transparent fail-open prefix write failed: %v", label, err)
