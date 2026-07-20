@@ -34,6 +34,9 @@ type Config struct {
 	LogMaxMB                     float64
 	LogBackups                   int
 	PprofListen                  string
+	TransparentListen            string
+	TransparentFailOpen          bool
+	TransparentDCMap             []string
 	cfproxyMu                    sync.RWMutex
 	cfproxyFailUntil             map[string]time.Time
 }
@@ -82,6 +85,7 @@ type handshakeInfo struct {
 	IsMedia    bool
 	ProtoTag   []byte
 	ClientDecI []byte
+	Direct     bool
 }
 
 type dcKey struct {
