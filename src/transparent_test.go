@@ -157,7 +157,7 @@ func TestParseTransparentFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.TransparentListen != "0.0.0.0:1444" || cfg.TransparentFailOpen {
+	if len(cfg.TransparentListen) != 1 || cfg.TransparentListen[0] != "0.0.0.0:1444" || cfg.TransparentFailOpen {
 		t.Fatalf("unexpected transparent config: %+v", cfg)
 	}
 	if len(cfg.TransparentDCMap) != 1 || cfg.TransparentDCMap[0] != "3:203.0.113.0/24" {
