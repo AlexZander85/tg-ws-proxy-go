@@ -39,11 +39,15 @@ func parseFlags(args []string) (*Config, error) {
 	dcIPDefault := fs.String("dc-ip-default", "149.154.167.220", "Default WS target IP for all implicit DCs when --dc-ip is not provided")
 	dcIPDefaultPool := fs.String("dc-ip-default-pool", "", "Default WS target IP pool for implicit DCs, comma-separated")
 	pprofListen := fs.String("pprof-listen", "", "Optional pprof listen address (e.g. 127.0.0.1:6060)")
+	transparentListen := fs.String("transparent-listen", "", "Optional Linux TPROXY listener address (for example 0.0.0.0:1444)")
+	transparentFailOpen := fs.Bool("transparent-fail-open", true, "Forward unrecognized transparent connections to their original destination")
 
 	var dcIPs multiFlag
 	var dcIPPools multiFlag
+	var transparentDCMap multiFlag
 	fs.Var(&dcIPs, "dc-ip", "Target DC IP as DC:IP; repeatable")
 	fs.Var(&dcIPPools, "dc-ip-pool", "Target pool as DC:IP1,IP2,...; repeatable")
+	fs.Var(&transparentDCMap, "transparent-dc-map", "Map original destination to Telegram DC as DC:CIDR; repeatable")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
@@ -170,6 +174,16 @@ func parseFlags(args []string) (*Config, error) {
 		workerDomains = wd
 	}
 
+	transparentAddress := strings.TrimSpace(*transparentListen)
+	if transparentAddress != "" {
+		if _, err := transparentListenNetwork(transparentAddress); err != nil {
+			return nil, err
+		}
+	}
+	if err := validateTransparentDCMappings(transparentDCMap); err != nil {
+		return nil, fmt.Errorf("invalid --transparent-dc-map: %w", err)
+	}
+
 	cfg := &Config{
 		Host:                         *host,
 		Port:                         *port,
@@ -197,6 +211,9 @@ func parseFlags(args []string) (*Config, error) {
 		LogMaxMB:                     *logMaxMB,
 		LogBackups:                   maxInt(*logBackups, 0),
 		PprofListen:                  strings.TrimSpace(*pprofListen),
+		TransparentListen:            transparentAddress,
+		TransparentFailOpen:          *transparentFailOpen,
+		TransparentDCMap:             append([]string(nil), transparentDCMap...),
 	}
 
 	cfg.setCFProxyDomains(domainPool)
