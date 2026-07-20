@@ -10,6 +10,8 @@ import (
 type Config struct {
 	Host                         string
 	Port                         int
+	NoMTProxyListener            bool
+	OutboundMark                 uint32
 	SecretHex                    string
 	GenSecret                    bool
 	PrintLink                    bool
@@ -34,7 +36,7 @@ type Config struct {
 	LogMaxMB                     float64
 	LogBackups                   int
 	PprofListen                  string
-	TransparentListen            string
+	TransparentListen            []string
 	TransparentFailOpen          bool
 	TransparentDCMap             []string
 	cfproxyMu                    sync.RWMutex
@@ -42,18 +44,19 @@ type Config struct {
 }
 
 type Stats struct {
-	connectionsTotal  int64
-	connectionsActive int64
-	connectionsWS     int64
-	connectionsTCP    int64
-	connectionsCF     int64
-	connectionsFront  int64
-	connectionsBad    int64
-	wsErrors          int64
-	bytesUp           int64
-	bytesDown         int64
-	poolHits          int64
-	poolMisses        int64
+	connectionsTotal       int64
+	connectionsActive      int64
+	connectionsTransparent int64
+	connectionsWS          int64
+	connectionsTCP         int64
+	connectionsCF          int64
+	connectionsFront       int64
+	connectionsBad         int64
+	wsErrors               int64
+	bytesUp                int64
+	bytesDown              int64
+	poolHits               int64
+	poolMisses             int64
 }
 
 func (s *Stats) summary() string {
@@ -65,9 +68,10 @@ func (s *Stats) summary() string {
 		poolS = fmt.Sprintf("%d/%d", hits, poolTotal)
 	}
 	return fmt.Sprintf(
-		"total=%d active=%d ws=%d tcp_fb=%d cf=%d front=%d bad=%d err=%d pool=%s up=%s down=%s",
+		"total=%d active=%d transparent=%d ws=%d tcp_fb=%d cf=%d front=%d bad=%d err=%d pool=%s up=%s down=%s",
 		atomic.LoadInt64(&s.connectionsTotal),
 		atomic.LoadInt64(&s.connectionsActive),
+		atomic.LoadInt64(&s.connectionsTransparent),
 		atomic.LoadInt64(&s.connectionsWS),
 		atomic.LoadInt64(&s.connectionsTCP),
 		atomic.LoadInt64(&s.connectionsCF),
