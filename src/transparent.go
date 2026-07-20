@@ -100,14 +100,17 @@ func handleTransparentClient(client net.Conn, cfg *Config, secret []byte) {
 		return
 	}
 
-	dcSource := "handshake"
-	if !validTransparentDC(hi.DC) {
-		if dc, mapped := transparentDCForIP(cfg, original.IP); mapped {
-			hi.DC = dc
-			dcSource = "destination"
-		}
+	dcSource := ""
+	if dc, mapped := transparentDCForIP(cfg, original.IP); mapped {
+		hi.DC = dc
+		dcSource = "destination"
+	} else if validTransparentDC(hi.DC) {
+		dcSource = "handshake"
+	} else if dc, mapped := transparentDCForIPRange(original.IP); mapped {
+		hi.DC = dc
+		dcSource = "destination-range"
 	}
-	if !validTransparentDC(hi.DC) {
+	if dcSource == "" {
 		transparentFailOpenIfEnabled(client, cfg, original, handshake, label, fmt.Sprintf("unresolved DC %d", hi.DC))
 		return
 	}
