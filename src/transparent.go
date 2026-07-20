@@ -12,6 +12,50 @@ import (
 	"time"
 )
 
+func serveTransparent(ln net.Listener, cfg *Config, secret []byte, sessionsSem chan struct{}) {
+	acceptBackoff := acceptBackoffMin
+	tcpLn, _ := ln.(*net.TCPListener)
+
+	for {
+		if tcpLn != nil {
+			_ = tcpLn.SetDeadline(time.Now().Add(acceptPollTimeout))
+		}
+		conn, err := ln.Accept()
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				acceptBackoff = acceptBackoffMin
+				continue
+			}
+			log.Printf("WARN   transparent accept error: %v", err)
+			time.Sleep(acceptBackoff)
+			acceptBackoff *= 2
+			if acceptBackoff > acceptBackoffMax {
+				acceptBackoff = acceptBackoffMax
+			}
+			continue
+		}
+		acceptBackoff = acceptBackoffMin
+		atomic.AddInt64(&stats.connectionsTotal, 1)
+
+		select {
+		case sessionsSem <- struct{}{}:
+			go func(client net.Conn) {
+				defer func() { <-sessionsSem }()
+				defer func() {
+					if recovered := recover(); recovered != nil {
+						_ = client.Close()
+						log.Printf("ERROR  [%s] transparent panic recovered: %v", client.RemoteAddr(), recovered)
+					}
+				}()
+				handleTransparentClient(client, cfg, secret)
+			}(conn)
+		default:
+			log.Printf("WARN   max concurrent sessions reached (%d), dropping transparent client %s", cfg.MaxConns, conn.RemoteAddr())
+			_ = conn.Close()
+		}
+	}
+}
+
 func handleTransparentClient(client net.Conn, cfg *Config, secret []byte) {
 	atomic.AddInt64(&stats.connectionsActive, 1)
 	atomic.AddInt64(&stats.connectionsTransparent, 1)
