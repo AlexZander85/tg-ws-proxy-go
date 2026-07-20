@@ -6,20 +6,33 @@ The feature is disabled by default and does not modify firewall or routing state
 
 ## Start the listener
 
+Transparent-only IPv4 example:
+
 ```shell
 tg-ws-proxy \
-  --host 127.0.0.1 \
-  --port 1443 \
-  --transparent-listen 0.0.0.0:1444
+  --no-mtproxy-listener \
+  --transparent-listen 0.0.0.0:1444 \
+  --outbound-mark 0x8000
 ```
 
-The process needs `CAP_NET_ADMIN` (or root) to create an `IP_TRANSPARENT` socket.
+The process needs `CAP_NET_ADMIN` (or root) both for `IP_TRANSPARENT` and for Linux `SO_MARK`. Omit `--no-mtproxy-listener` to keep the normal secret-based MTProxy listener active in parallel.
+
+The listener option is repeatable, which allows explicit dual-stack binding:
+
+```shell
+--transparent-listen 0.0.0.0:1444 \
+--transparent-listen '[::]:1444'
+```
+
+`--max-conns` is a process-wide limit shared by the explicit MTProxy listener and all transparent listeners.
 
 Unrecognized or incomplete connections are forwarded to their original destination by default. Disable that behavior with:
 
 ```shell
 --transparent-fail-open=false
 ```
+
+Fail-open, direct Telegram TCP fallback, WebSocket, CF proxy, CF Worker and pool connections all use the configured outbound mark. This lets firewall OUTPUT rules return marked packets before applying TPROXY and prevents routing loops.
 
 ## Data-center mappings
 
@@ -47,4 +60,12 @@ nft add rule inet tg_ws_proxy prerouting \
   tcp dport 443 meta mark set 0x1444 tproxy to :1444 accept
 ```
 
-Adapt interface matching, IPv6 rules, Telegram address sets and exclusions to the host firewall. In particular, avoid redirecting traffic created by the proxy itself when applying equivalent rules to locally generated traffic.
+For locally generated Telegram traffic, return the proxy's outbound mark before marking other OUTPUT packets:
+
+```shell
+nft 'add chain inet tg_ws_proxy output { type route hook output priority mangle; policy accept; }'
+nft add rule inet tg_ws_proxy output meta mark 0x8000 return
+# Add Telegram destination matching and packet marking after the return rule.
+```
+
+Adapt interface matching, IPv6 rules, Telegram address sets and exclusions to the host firewall. The numeric mark passed to `--outbound-mark` must match the firewall bypass rule and **must be different from the TPROXY routing mark**. The TPROXY mark has an `ip rule` that routes packets to a local table; reusing it as `SO_MARK` could route the proxy's own upstream sockets back to loopback before the OUTPUT chain can bypass them.
