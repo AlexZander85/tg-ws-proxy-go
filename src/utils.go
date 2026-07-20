@@ -7,6 +7,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"sync/atomic"
 	"time"
 )
 
@@ -17,8 +18,16 @@ var tcpKeepAliveConfig = net.KeepAliveConfig{
 	Count:    3,
 }
 
+var upstreamSocketMark atomic.Uint32
+
+func setUpstreamSocketMark(mark uint32) {
+	upstreamSocketMark.Store(mark)
+}
+
 func newUpstreamDialer(timeout time.Duration) *net.Dialer {
-	return &net.Dialer{Timeout: timeout, KeepAliveConfig: tcpKeepAliveConfig}
+	d := &net.Dialer{Timeout: timeout, KeepAliveConfig: tcpKeepAliveConfig}
+	configureUpstreamDialer(d, upstreamSocketMark.Load())
+	return d
 }
 
 func formatFloat(v float64) string {
