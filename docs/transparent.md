@@ -45,6 +45,25 @@ Additional or overriding mappings are repeatable:
 --transparent-dc-map 4:2001:67c:4e8:f004::/64
 ```
 
+## Machine-readable discovery
+
+Integrations can inspect the exact feature set and built-in destination mappings without starting listeners or generating a secret:
+
+```shell
+tg-ws-proxy --capabilities
+```
+
+The command writes one JSON document to stdout and exits. Schema version `1` includes:
+
+- the target `goos`;
+- boolean feature identifiers for transparent TPROXY, repeated listeners, fail-open, DC-map overrides, optional explicit MTProxy and outbound `SO_MARK`;
+- the corresponding CLI flag names;
+- `transparent.default_dc_map`, copied from the same built-in map used by the resolver.
+
+An integrating application should build its Telegram firewall address sets from `transparent.default_dc_map`, merge any dynamically maintained or user-supplied ranges, and pass the same overrides back through `--transparent-dc-map`. This keeps interception and DC resolution synchronized.
+
+The binary intentionally does not download or refresh Telegram network lists. Updating only the internal resolver would not update the external TPROXY firewall set, while allowing the daemon to fetch routing policy would introduce a second source of truth and a network dependency during startup. Dynamic refresh therefore belongs to the component that owns firewall lifecycle and can replace both the address set and proxy arguments atomically.
+
 ## nftables example (IPv4)
 
 Choose a mark and routing table that do not conflict with the rest of the router configuration:
